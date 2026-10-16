@@ -130,3 +130,7 @@ export default function App() {
 
 The window controls use the Material Symbols icon font, which the package
 loads from Google Fonts.
+
+## License
+
+MIT
