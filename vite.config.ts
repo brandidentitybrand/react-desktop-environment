@@ -7,6 +7,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import dts from 'vite-plugin-dts'
 import { libInjectCss } from 'vite-plugin-lib-inject-css'
+import { minify } from 'terser'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -25,6 +26,22 @@ export default defineConfig({
         'src/components/Desktop/(removed) index.tsx',
       ],
     }),
+    {
+      // Vite never minifies ES library output, so source comments would ship.
+      // Strip them without compressing or mangling, keeping pure annotations.
+      name: 'strip-comments',
+      apply: 'build',
+      enforce: 'post',
+      async renderChunk(code) {
+        const result = await minify(code, {
+          compress: false,
+          mangle: false,
+          module: true,
+          format: { beautify: true, comments: false, preserve_annotations: true },
+        })
+        return { code: result.code ?? code, map: null }
+      },
+    },
   ],
   publicDir: false,
   build: {
