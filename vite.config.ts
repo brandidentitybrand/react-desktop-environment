@@ -13,8 +13,20 @@ export default defineConfig({
   plugins: [
     react(),
     libInjectCss(),
-    dts({ exclude: ['**/*.stories.tsx', 'src/stories', 'src/test', '**/*.test.tsx'] }),
+    dts({
+      tsconfigPath: './tsconfig.app.json',
+      entryRoot: 'src',
+      exclude: [
+        '**/*.stories.ts',
+        '**/*.stories.tsx',
+        'src/stories',
+        'src/test',
+        '**/*.test.tsx',
+        'src/components/Desktop/(removed) index.tsx',
+      ],
+    }),
   ],
+  publicDir: false,
   build: {
     lib: {
       entry: resolve(__dirname, 'src/main.ts'),

@@ -1,7 +1,27 @@
 {
   "name": "react-desktop-environment",
   "private": false,
-  "version": "0.3.3",
+  "version": "0.4.0",
+  "description": "Desktop-style windowing for React: draggable, resizable windows, a start bar for minimised windows, and a nested window manager.",
+  "keywords": [
+    "react",
+    "react-component",
+    "desktop",
+    "desktop-environment",
+    "window",
+    "window-manager",
+    "draggable",
+    "resizable",
+    "taskbar"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/brandidentitybrand/react-desktop-environment.git"
+  },
+  "homepage": "https://github.com/brandidentitybrand/react-desktop-environment#readme",
+  "bugs": {
+    "url": "https://github.com/brandidentitybrand/react-desktop-environment/issues"
+  },
   "type": "module",
   "files": [
     "dist"
@@ -24,23 +44,23 @@
     "prepublishOnly": "vitest run && npm run build"
   },
   "peerDependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react": "^18.3.1 || ^19.0.0",
+    "react-dom": "^18.3.1 || ^19.0.0"
   },
   "devDependencies": {
     "@chromatic-com/storybook": "^1.5.0",
-    "@storybook/addon-essentials": "^8.1.10",
-    "@storybook/addon-interactions": "^8.1.10",
-    "@storybook/addon-links": "^8.1.10",
-    "@storybook/addon-onboarding": "^8.1.10",
-    "@storybook/blocks": "^8.1.10",
-    "@storybook/react": "^8.1.10",
-    "@storybook/react-vite": "^8.1.10",
-    "@storybook/test": "^8.1.10",
-    "@testing-library/react": "^16.0.0",
+    "@storybook/addon-essentials": "^8.4.7",
+    "@storybook/addon-interactions": "^8.4.7",
+    "@storybook/addon-links": "^8.4.7",
+    "@storybook/addon-onboarding": "^8.4.7",
+    "@storybook/blocks": "^8.4.7",
+    "@storybook/react": "^8.4.7",
+    "@storybook/react-vite": "^8.4.7",
+    "@storybook/test": "^8.4.7",
+    "@testing-library/react": "^16.1.0",
     "@types/node": "^20.14.8",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
     "@typescript-eslint/eslint-plugin": "^7.13.1",
     "@typescript-eslint/parser": "^7.13.1",
     "@vitejs/plugin-react": "^4.3.1",
@@ -56,7 +76,9 @@
     "glob": "^10.4.2",
     "jsdom": "^24.1.0",
     "prettier": "^3.3.2",
-    "storybook": "^8.1.10",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "storybook": "^8.4.7",
     "stylelint": "^16.6.1",
     "stylelint-config-standard": "^36.0.1",
     "typescript": "^5.4.5",
