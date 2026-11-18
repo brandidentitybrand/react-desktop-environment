@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react'
 // import  { DraggableResizableContext } from "../DraggableResizable";
-import { fn } from '@storybook/test'
 
 import Window from '.'
 

@@ -1,7 +1,7 @@
 import css from './index.module.css'
 import clsx from 'clsx'
-import { useRef, useState, cloneElement, Children } from 'react'
-import type { CSSProperties, DragEvent, PropsWithChildren } from 'react'
+import { useRef, useState } from 'react'
+import type { CSSProperties, DragEvent } from 'react'
 import { Border } from './Border'
 // TODO: type for context
 
@@ -70,7 +70,7 @@ export default function DraggableResizable({
     controllerSideEffects,
   } = props
   const classNames = clsx(css.DraggableResizable)
-  const divRef = useRef<HTMLElement>(null)
+  const divRef = useRef<HTMLDivElement>(null)
 
   const [gridPosition, _setGridPosition] = useState(initialPosition)
   function setGridPosition(nextGridPosition: Position) {
@@ -100,7 +100,7 @@ export default function DraggableResizable({
    * mouse position relative to browser viewport: e.clientX,  e.clientY
    */
   const onDragStartMousePositionRef = useRef<Position | undefined>(undefined)
-  function initialiseOnDragStartMousePositionRef(e) {
+  function initialiseOnDragStartMousePositionRef(e: DragEvent<HTMLElement>) {
     onDragStartMousePositionRef.current = {
       left: e.clientX,
       top: e.clientY,
@@ -136,13 +136,13 @@ export default function DraggableResizable({
     initialiseOnDragStartGridPositionRef()
     initialiseOnDragStartGridSizeRef()
   }
-  function checkIfDragReady(): boolean {
-    return (
-      onDragStartGridPositionRef.current !== undefined &&
-      onDragStartGridSizeRef.current !== undefined &&
-      onDragStartGridSizeRef.current.width !== 'max' &&
-      onDragStartGridSizeRef.current.height !== 'max'
-    )
+  function getDragStartState() {
+    const position = onDragStartGridPositionRef.current
+    const size = onDragStartGridSizeRef.current
+    if (!position || !size || size.width === 'max' || size.height === 'max') {
+      return undefined
+    }
+    return { position, size: { width: size.width, height: size.height } }
   }
   function endDrag(): void {
     onDragStartMousePositionRef.current = undefined
@@ -152,12 +152,13 @@ export default function DraggableResizable({
   const draggableProps = {
     draggable: true,
     onDrag: (e: DragEvent<HTMLElement>) => {
-      if (checkIfDragReady()) {
+      const dragStart = getDragStartState()
+      if (dragStart) {
         const mousePositionChange = getOnDragMousePositionChange(e)
         // position
         const nextPosition = {
-          left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-          top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+          left: mousePositionChange.left + dragStart.position.left,
+          top: mousePositionChange.top + dragStart.position.top,
         }
         setGridPosition(nextPosition)
         e.preventDefault()
@@ -199,8 +200,11 @@ export default function DraggableResizable({
       setIsDraggable(false)
     },
     unmaximise: function () {
-      setGridSize(gridSizeBeforeMaximisation.current)
-      setGridPosition(gridPositionBeforeMaximisation.current)
+      const size = gridSizeBeforeMaximisation.current
+      const position = gridPositionBeforeMaximisation.current
+      if (!size || !position) return
+      setGridSize(size)
+      setGridPosition(position)
       gridSizeBeforeMaximisation.current = undefined
       gridPositionBeforeMaximisation.current = undefined
       setIsDraggable(true)
@@ -255,19 +259,20 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             console.log(mousePositionChange)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: mousePositionChange.top + dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -281,18 +286,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: onDragStartGridPositionRef.current.left,
-              top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+              left: dragStart.position.left,
+              top: mousePositionChange.top + dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -306,18 +312,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -331,14 +338,15 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             // postion doesnt change
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -353,18 +361,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: onDragStartGridPositionRef.current.left,
-              top: onDragStartGridPositionRef.current.top + mousePositionChange.top,
+              left: dragStart.position.left,
+              top: dragStart.position.top + mousePositionChange.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -378,14 +387,15 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             // position unchanged
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -399,18 +409,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height,
             }
             setGridSize(nextSize)
           }
@@ -424,14 +435,15 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             // position unchanged
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height,
             }
             setGridSize(nextSize)
           }
@@ -446,18 +458,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: mousePositionChange.top + dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -471,18 +484,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: onDragStartGridPositionRef.current.left,
-              top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+              left: dragStart.position.left,
+              top: mousePositionChange.top + dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -496,18 +510,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -521,14 +536,15 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             // postion doesnt change
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -542,18 +558,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: mousePositionChange.top + dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -567,18 +584,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: mousePositionChange.left + onDragStartGridPositionRef.current.left,
-              top: onDragStartGridPositionRef.current.top,
+              left: mousePositionChange.left + dragStart.position.left,
+              top: dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width - mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width - mousePositionChange.left,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -592,18 +610,19 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             const nextPosition = {
-              left: onDragStartGridPositionRef.current.left,
-              top: mousePositionChange.top + onDragStartGridPositionRef.current.top,
+              left: dragStart.position.left,
+              top: mousePositionChange.top + dragStart.position.top,
             }
             setGridPosition(nextPosition)
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height - mousePositionChange.top,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height - mousePositionChange.top,
             }
             setGridSize(nextSize)
           }
@@ -617,14 +636,15 @@ export default function DraggableResizable({
         }}
         onDragEnd={endDrag}
         onDrag={(e) => {
-          if (checkIfDragReady()) {
+          const dragStart = getDragStartState()
+          if (dragStart) {
             const mousePositionChange = getOnDragMousePositionChange(e)
             // position
             // postion doesnt change
             // size
             const nextSize = {
-              width: onDragStartGridSizeRef.current.width + mousePositionChange.left,
-              height: onDragStartGridSizeRef.current.height + mousePositionChange.top,
+              width: dragStart.size.width + mousePositionChange.left,
+              height: dragStart.size.height + mousePositionChange.top,
             }
             setGridSize(nextSize)
           }

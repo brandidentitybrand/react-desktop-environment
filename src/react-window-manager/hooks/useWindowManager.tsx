@@ -1,15 +1,23 @@
 // import WindowManagerProvider from "../contexts/WindowManager";
 // import WindowRenderer from "../../components/(removed)WindowRenderer";
 import type { WindowId, Windows } from './useWindowManagerRegistry'
-import { useState, useRef, useContext, useReducer } from 'react'
+import { useState, useContext } from 'react'
 import { WindowManagerRegistryContext } from '../contexts/WindowManagerRegistry'
+
+import type { DraggableResizableProps } from '../../components/DraggableResizable'
+
+interface ChildrenWindowController {
+  moveWindowToTop: (childWindowId: WindowId) => void
+  hideWindow: (childWindowId: WindowId) => void
+  unhideWindow: (childWindowId: WindowId) => void
+}
 
 export default function useWindowManager(windowId: WindowId) {
   const { components, windowSpecsRef } = useContext(WindowManagerRegistryContext)
 
   const [windows, setWindows] = useState<Windows>(windowSpecsRef.current[windowId].windows)
 
-  const { active, hidden, closed } = windows
+  const { active, hidden } = windows
 
   // render window with WindowManagerProvider
   function renderWindow(
@@ -25,7 +33,9 @@ export default function useWindowManager(windowId: WindowId) {
       />
     )
   }
-  function renderChildrenWindows(childrenWindowController): React.ReactNode {
+  function renderChildrenWindows(
+    childrenWindowController: ChildrenWindowController
+  ): React.ReactNode {
     return active.map((childWindowId) => {
       const childWindowSpec = windowSpecsRef.current[childWindowId]
       const { componentName, props } = childWindowSpec
@@ -77,7 +87,7 @@ export default function useWindowManager(windowId: WindowId) {
         return next
       })
     },
-    hideWindow: function (childWindowId) {
+    hideWindow: function (childWindowId: WindowId) {
       const nextActive = active.filter((value) => {
         if (value === childWindowId) return false
         return true
@@ -96,7 +106,7 @@ export default function useWindowManager(windowId: WindowId) {
       })
     },
 
-    unhideWindow: function (childWindowId) {
+    unhideWindow: function (childWindowId: WindowId) {
       console.log(windowSpecsRef.current[childWindowId].props.initialPosition)
       const nextHidden = hidden.filter((value) => {
         if (value === childWindowId) return false
@@ -118,16 +128,18 @@ export default function useWindowManager(windowId: WindowId) {
   }
   //TODO: maybe move this to utils.ts
   const windowInitialPropsUpdater = {
-    updateInitialPosition: function (gridPosition) {
+    updateInitialPosition: function (
+      gridPosition: NonNullable<DraggableResizableProps['initialPosition']>
+    ) {
       windowSpecsRef.current[windowId].props.initialPosition = gridPosition
       console.log(windowSpecsRef.current[windowId])
     },
 
-    updateInitialSize: function (gridSize) {
+    updateInitialSize: function (gridSize: NonNullable<DraggableResizableProps['initialSize']>) {
       windowSpecsRef.current[windowId].props.initialSize = gridSize
     },
 
-    updateDraggable: function (isDraggable) {
+    updateDraggable: function (isDraggable: boolean) {
       windowSpecsRef.current[windowId].props.draggable = isDraggable
     },
   }

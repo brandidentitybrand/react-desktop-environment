@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from '@storybook/react'
-import { fn } from '@storybook/test'
 import Desktop from '../components/Desktop/(removed) index'
 import Window from '../components/Window'
 import WindowExample from './WindowExample'
@@ -38,10 +37,7 @@ const meta: Meta<typeof Desktop> = {
           },
         },
         windows: {
-          active: [
-            '3',
-            '4',
-          ],
+          active: ['3', '4'],
           hidden: [],
           closed: [],
         },
