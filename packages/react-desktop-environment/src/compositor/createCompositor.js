@@ -104,7 +104,7 @@ export default function createCompositor(options = {}) {
     }
   }
   const isImmediateChildSurface = (parentSurface, childSurface) => (
-    childSurface?.window?.parentWindowId === parentSurface.windowId
+    childSurface && windowManager.window.read(childSurface)?.parentWindowId === parentSurface.windowId
   )
   const reconcileSurfaceSelections = (surfaces) => {
     const invalid = Object.values(surfaces).filter(parent => parent.selectedChildSurfaceId != null
@@ -462,7 +462,7 @@ export default function createCompositor(options = {}) {
     },
   })
 
-  const reconcileWindows = () => {
+  const reconcileWindows = previous => {
     const surfaces = {}
     Object.entries(compositor.state.surfaces).forEach(([surfaceId, current]) => {
       const window = windowManager.window.read({ windowId: current.windowId })
@@ -470,7 +470,7 @@ export default function createCompositor(options = {}) {
         surfaceControlsCache.delete(surfaceId)
         return
       }
-      if (window !== current.window) {
+      if (window !== (previous?.windows?.[current.windowId] ?? current.window)) {
         surfaces[surfaceId] = Object.freeze({ ...current, window })
       } else {
         surfaces[surfaceId] = current
@@ -536,11 +536,5 @@ export default function createCompositor(options = {}) {
     destroy: unsubscribeWindowManager,
   }
   Object.values(compositor.state.applications).forEach(record => requireApplicationComponent(record.applicationName))
-  Object.values(compositor.state.surfaces).forEach(surface => {
-    const application = compositor.state.applications[surface.applicationId]
-    const window = windowManager.window.read({ windowId: surface.windowId })
-    if (surface.application !== application) surface.application = application
-    if (surface.window !== window) surface.window = window
-  })
   return compositor
 }

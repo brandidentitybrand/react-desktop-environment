@@ -11,16 +11,6 @@ const resolveCreateId = (createId) => {
   return () => `window:${globalThis.crypto.randomUUID()}`
 }
 
-const freezeWindows = (windows = {}) =>
-  Object.freeze(
-    Object.fromEntries(
-      Object.entries(windows).map(([windowId, window]) => [
-        windowId,
-        Object.isFrozen(window) ? window : Object.freeze({ ...window }),
-      ]),
-    ),
-  )
-
 const validateSnapshot = snapshot => {
 
   Object.entries(snapshot.windows).forEach(([windowId, window]) => {
@@ -58,10 +48,10 @@ export default function createWindowManager(options = {}) {
   const listeners = new Set()
   const childCache = new Map()
 
-  const notify = () => listeners.forEach((listener) => listener())
   const commit = (windows) => {
-    manager.state = validateSnapshot(Object.freeze({ windows: freezeWindows(windows) }))
-    notify()
+    const previous = manager.state
+    manager.state = validateSnapshot(Object.freeze({ windows: Object.freeze(windows) }))
+    listeners.forEach(listener => listener(previous))
     return manager.state
   }
   const requireWindow = (windowId) => {

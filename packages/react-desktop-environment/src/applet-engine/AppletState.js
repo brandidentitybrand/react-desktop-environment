@@ -120,7 +120,8 @@ const requireStateName = (stateName) => {
   return stateName
 }
 
-export function createAppletStateStore({ applications = {}, initialState = {} } = {}) {
+export function createAppletStateStore({ applications = {}, initialState } = {}) {
+  const state = initialState ?? {}
   const records = new Map()
   const requireRecord = id => {
     const record = records.get(id)
@@ -138,43 +139,54 @@ export function createAppletStateStore({ applications = {}, initialState = {} } 
   const addApplication = (application, { savedState, supply } = {}) => {
     const id = application.applicationId
     if (!records.has(id)) records.set(id, {
-      application, local: Object.create(null), declarations: new Map(), owners: new Map(),
+      application, declarations: new Map(), owners: new Map(),
       setters: new Map(), listeners: new Map(),
     })
     if (savedState !== undefined) {
       Object.entries(savedState).forEach(([name, value]) => {
-        const table = initialState[id] ??= Object.create(null)
+        const table = state[id] ??= Object.create(null)
         table[name] = value
         records.get(id).owners.set(name, ownerOf(supply))
       })
     }
     return application
   }
-  Object.values(applications).forEach(application => addApplication(application))
-  const values = (id, name) => requireRecord(id).declarations.get(name)?.persistent === false
-    ? requireRecord(id).local : initialState[id]
+  Object.values(applications).forEach(application => {
+    addApplication(application)
+    records.get(application.applicationId).restored = initialState !== undefined
+  })
   const read = ({ applicationId, stateName }) => {
     requireStateName(stateName)
-    return values(applicationId, stateName)?.[stateName]
+    const declaration = requireRecord(applicationId).declarations.get(stateName)
+    const saved = state[applicationId]?.[stateName]
+    return declaration && (!declaration.persistent || Object.is(declaration.source, saved))
+      ? declaration.value : saved
   }
   const notify = (record, name) => record.listeners.get(name)?.forEach(listener => listener())
   const write = ({ applicationId, stateName, value, supply }) => {
-    requireStateName(stateName)
+    const current = read({ applicationId, stateName })
     const record = requireRecord(applicationId)
     const owner = ownerOf(supply)
-    const table = values(applicationId, stateName) ?? (initialState[applicationId] = Object.create(null))
-    if (owner && Object.hasOwn(table, stateName) && record.owners.get(stateName) !== owner) return table[stateName]
+    const declaration = record.declarations.get(stateName)
+    const saved = state[applicationId]
+    if (owner && (record.owners.has(stateName) || saved && Object.hasOwn(saved, stateName))
+      && record.owners.get(stateName) !== owner) return current
     record.owners.set(stateName, owner)
-    if (!Object.is(table[stateName], value) || !Object.hasOwn(table, stateName)) {
+    if (declaration?.persistent !== false) {
+      const table = saved ?? (state[applicationId] = Object.create(null))
       table[stateName] = value
-      notify(record, stateName)
     }
-    return table[stateName]
+    if (declaration) {
+      declaration.value = value
+      declaration.source = value
+    }
+    if (!Object.is(current, value)) notify(record, stateName)
+    return value
   }
   const endApplicationState = ({ applicationId }) => {
     const record = requireRecord(applicationId)
-    delete initialState[applicationId]
-    record.local = Object.create(null)
+    delete state[applicationId]
+    record.restored = false
     record.declarations.clear()
     record.owners.clear()
     record.setters.clear()
@@ -182,8 +194,9 @@ export function createAppletStateStore({ applications = {}, initialState = {} } 
   }
   return {
     addApplication,
-    getSnapshot: () => initialState,
-    snapshot: id => initialState[id],
+    getSnapshot: () => state,
+    snapshot: id => state[id],
+    isRestored: ({ applicationId }) => records.get(applicationId)?.restored === true,
     read, write, endApplicationState,
     ensure({ applicationId, stateName, initialValue, persistent = true, adopt, deferNotifications }) {
       requireStateName(stateName)
@@ -192,20 +205,24 @@ export function createAppletStateStore({ applications = {}, initialState = {} } 
       if (previous && previous.persistent !== persistent) throw new Error(`Applet state ${stateName} changed persistence for ${applicationId}`)
       if (adopt !== undefined && typeof adopt !== 'function') throw new TypeError('Applet state adopt must be a function')
       if (previous && previous.adopt === adopt) return read({ applicationId, stateName })
-      record.declarations.set(stateName, { persistent, adopt })
-      const table = values(applicationId, stateName) ?? (initialState[applicationId] = Object.create(null))
-      const candidate = table[stateName]
+      const candidate = previous || persistent ? read({ applicationId, stateName }) : undefined
       const recognized = candidate !== undefined && adopt ? adopt(candidate) : candidate
-      const value = recognized === undefined
+      const next = recognized === undefined
         ? typeof initialValue === 'function' ? initialValue() : initialValue
         : recognized
-      if (recognized === undefined) record.owners.set(stateName, `applicationId:${applicationId}`)
-      if (!Object.hasOwn(table, stateName) || !(persistent ? sameLocalStateValue(candidate, value) : Object.is(candidate, value))) {
+      const same = persistent ? sameLocalStateValue(candidate, next) : Object.is(candidate, next)
+      const value = same ? candidate : next
+      if (persistent && !record.restored) {
+        const table = state[applicationId] ?? (state[applicationId] = Object.create(null))
         table[stateName] = value
-        if (previous && deferNotifications) queueMicrotask(() => notify(record, stateName))
-        else if (previous) notify(record, stateName)
       }
-      return table[stateName]
+      record.declarations.set(stateName, { persistent, adopt, source: state[applicationId]?.[stateName], value })
+      if (recognized === undefined) record.owners.set(stateName, `applicationId:${applicationId}`)
+      if (previous && !same) {
+        if (deferNotifications) queueMicrotask(() => notify(record, stateName))
+        else notify(record, stateName)
+      }
+      return value
     },
     getSetter({ applicationId, stateName }) {
       const record = requireRecord(applicationId)
@@ -222,7 +239,7 @@ export function createAppletStateStore({ applications = {}, initialState = {} } 
     removeApplication({ applicationId }) {
       const { application } = requireRecord(applicationId)
       records.delete(applicationId)
-      delete initialState[applicationId]
+      delete state[applicationId]
       return application
     },
     subscribe({ applicationId, stateName }, listener) {

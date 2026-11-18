@@ -100,6 +100,29 @@ describe('createCompositor', () => {
     ).toEqual([])
   })
 
+  it('keeps the exact saved records until a related Window or Application changes', () => {
+    const source = createSystems()
+    const window = addWindow(source.windowManager)
+    const application = addApplication(source.compositor)
+    const surface = addSurface(source.compositor, { windowId: window.windowId, applicationId: application.applicationId })
+    const windows = JSON.parse(JSON.stringify(source.windowManager.getSnapshot()))
+    const saved = JSON.parse(JSON.stringify(source.compositor.getSnapshot()))
+    const record = Object.freeze(saved.surfaces[surface.surfaceId])
+    const windowManager = createWindowManager({ initialSnapshot: windows })
+    const compositor = createCompositor({ windowManager, initialSnapshot: saved,
+      applicationRegistry: source.compositor.applicationRegistry,
+      surfaceComponentRegistry: source.compositor.surfaceComponentRegistry })
+    expect(compositor.getSnapshot()).toBe(saved)
+    expect(windowManager.getSnapshot()).toBe(windows)
+    const parent = addWindow(windowManager)
+    expect(windowManager.window.read(window)).toBe(windows.windows[window.windowId])
+    expect(compositor.surface.read(surface)).toBe(record)
+    const moved = windowManager.window.move({ windowId: window.windowId, parentWindowId: parent.windowId })
+    expect(compositor.surface.read(surface).window).toBe(moved)
+    const updated = compositor.application.update({ applicationId: application.applicationId, props: { draft: 42 } })
+    expect(compositor.surface.read(surface).application).toBe(updated)
+  })
+
   it('preserves unrelated surface references', () => {
     const { windowManager, compositor } = createSystems()
     const firstWindow = addWindow(windowManager)

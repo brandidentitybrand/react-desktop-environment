@@ -93,6 +93,13 @@ describe('Applet state', () => {
     })
     expect(initialValue).toHaveBeenCalledOnce()
     expect(value).toBe(initialValue.mock.results[0].value)
+    expect(store.snapshot(applicationId).request).toBe('obsolete')
+    const updated = { requestId: 'edited' }
+    store.getSetter({ applicationId, stateName: 'request' })(current => {
+      expect(current).toBe(value)
+      return updated
+    })
+    expect(store.snapshot(applicationId).request).toBe(updated)
   })
 
   it('reapplies recognition to both values when the owner catalogue changes', () => {
@@ -113,6 +120,21 @@ describe('Applet state', () => {
       adopt: (value) => value.every((key) => key === 'current') ? value : undefined,
     })
     expect(store.snapshot(applicationId)).toEqual({ columns: [] })
+  })
+
+  it('retains generated defaults of a newly created Application across save and reload', () => {
+    const initialState = {}
+    const store = createAppletStateStore({ initialState, applications: { notes: application } })
+    const subject = { applicationId: 'application:new', stateName: 'requestId' }
+    const child = { applicationId: subject.applicationId, applicationName: 'root/notes' }
+    store.addApplication(child)
+    const declaration = { ...subject, initialValue: () => crypto.randomUUID() }
+    const id = store.ensure(declaration)
+    expect(initialState[applicationId]).toBeUndefined()
+    const saved = JSON.parse(JSON.stringify(store.getSnapshot()))
+    const restored = createAppletStateStore({ applications: { child }, initialState: saved })
+    expect(restored.ensure(declaration)).toBe(id)
+    expect(restored.snapshot(child.applicationId).requestId).toBe(id)
   })
 
   it('keeps lifetime supply local to its target and operation', () => {
@@ -257,7 +279,6 @@ describe('Applet state', () => {
     })).toBe('current default')
     expect(store.snapshot(application.applicationId)).toEqual({
       obsolete: 'undeclared',
-      missing: 'current default',
       open: true,
     })
   })
@@ -307,7 +328,7 @@ describe('Applet state', () => {
     try {
       view.rerender(scene(['mixed']))
       expect(view.container.textContent).toBe('mixed')
-      expect(store.snapshot(application.applicationId)).toEqual({ columns: ['mixed'] })
+      expect(store.snapshot(applicationId)).toEqual({ columns: ['mixed'] })
       await act(async () => {})
       expect(errors.mock.calls.filter(([message]) => String(message).includes('Cannot update a component'))).toEqual([])
     } finally {
@@ -344,7 +365,7 @@ describe('Applet state', () => {
       await act(async () => { view.rerender(scene(true)) })
       expect(view.container.querySelector('output').textContent).toBe('mixed')
       expect(view.getByText('Suspended')).not.toBeNull()
-      expect(store.snapshot(application.applicationId)).toEqual({ columns: ['mixed'] })
+      expect(store.snapshot(applicationId)).toEqual({ columns: ['mixed'] })
       expect(errors.mock.calls.filter(([message]) => String(message).includes('Cannot update a component'))).toEqual([])
     } finally {
       view.unmount()

@@ -167,12 +167,13 @@ recipes precede ancestor recipes. Each resident definition appears once.
 The engine supplies one fullscreen Deck for every missing recipe. Its props
 contain the resolved recipe, admission and unmounting choices, order, and
 `resident: { containerSurfaceId, key: recipeName }`. A saved Deck retains its
-saved recipe; a missing Deck receives the current default recipe. Its resident
+saved recipe. During live supply, a missing Deck receives the current default recipe. Its resident
 members receive fresh Application/Surface/Window identities and record
 `resident: { containerSurfaceId, key: applicationName }` plus order. Starting
 state is supplied only when that occurrence is created.
 
-Supply runs after restoration and compositor changes. A resident record keeps
+Fresh composition and subsequent compositor operations can supply residents.
+Injecting a saved Workspace leaves its topology and member order intact. A resident record keeps
 its slot occupied during a held peel. Cancellation retains the record;
 completion removes its resident relation and supplies a fresh occurrence.
 Ordinary members have no supply requirement. An ordinary member added to an
@@ -201,8 +202,9 @@ context's engine. Engine creation, reset, disposal, and the
 
 The direct owner calls this hook only when it needs occurrence records. The
 hook resolves a matching inherited Application or the definition's permanent
-Application and ensures its anchor Surface and linked Window. Supplied records
-are retained. A matching inherited occurrence retains its exact registered
+Application. For a newly created Application it ensures an anchor Surface and
+linked Window. For a restored Application it reads the saved anchor or returns
+an absent Surface. An explicit `runtime.ensureAnchorSurface` can still create one. A matching inherited occurrence retains its exact registered
 path even when its definition appears under several parents. The direct owner
 waits for the Surface, then passes the records into the Applet.
 
@@ -260,10 +262,13 @@ const [value, setValue] = AppletEngine.useState(initialValue, 'semantic-name', {
 ```
 
 Names are nonempty strings scoped to the exact Application. A declaration
-supplies a missing value once. The owner adopts recognized saved JSON or uses
-its current default; undeclared saved values remain available before their owner mounts.
-Persistent values must be immutable JSON. `persistent: false` retains temporary
-occurrence values across presentation reparenting but omits them from capture.
+initializes a newly created Application’s named value once. On restoration the
+owner can recognize a saved value or display a missing value’s default. Reading
+and rendering a restored Application preserve its supplied state object.
+An explicit write to a persistent name updates that object. Persistent values
+must be immutable JSON. Undeclared saved values remain available before their
+owner mounts. `persistent: false`
+retains temporary occurrence values across presentation reparenting.
 Live callbacks, promises, requests, loading state, and resources remain with
 their React or host owners. Serializable retry identity and fixed operation
 input may be durable when the owning operation requires them.
@@ -277,7 +282,9 @@ runtime owners and tests; ordinary Applets declare named state through the hook.
 
 `engine.getState()` returns the live state by reference. Pass it to
 `options.initialState` to load it. Applications, Windows, and named state can
-exist without a Surface. Application props carry child identities. The host
+exist without a Surface. Loading preserves the supplied records before any live
+operation, including their resident order and missing occurrences. Application
+props carry child identities. The host
 decides when to serialize the state.
 
 ## GUI state and material

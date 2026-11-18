@@ -105,8 +105,10 @@ restored.appletState.ensure({
   adopt: (value) => value.every((column) => column === 'mixed') ? value : undefined,
   deferNotifications: true,
 })
-const adopted = restored.getState()
-assert.equal(JSON.stringify(adopted.appletState[originalApplicationId].columns), JSON.stringify(['mixed']))
+assert.deepEqual(restored.appletState.read(columnState), ['mixed'])
+assert.equal(Object.hasOwn(restored.getState().appletState[originalApplicationId], 'columns'), false)
+restored.appletState.write({ ...columnState, value: ['chosen'] })
+assert.deepEqual(restored.getState().appletState[originalApplicationId].columns, ['chosen'])
 await act(async () => { restoredRoot.unmount() })
 restored.destroy()
 

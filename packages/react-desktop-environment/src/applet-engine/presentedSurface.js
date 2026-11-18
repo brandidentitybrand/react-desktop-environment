@@ -2,7 +2,7 @@ import Deck from './Deck.jsx'
 
 export function isDeckSurface({ engine, surface }) {
   if (!engine || !surface) return false
-  const node = engine.runtime.resolveApplicationNode(surface.application)
+  const node = engine.runtime.resolveApplicationNode(engine.compositor.application.read(surface))
   return node?.Applet === Deck
 }
 

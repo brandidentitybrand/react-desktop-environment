@@ -437,30 +437,21 @@ describe('engine Deck recipes and residence', () => {
     engine.compositor.surface.update({ surfaceId: first.surfaceId, props: first.props })
   })
 
-  it('restores a workspace lacking resident Decks by supplying its default recipes', () => {
-    const { deck, engine, workspace } = residenceFixture()
-    const saved = engine.getState()
-    const surfaces = Object.fromEntries([engine.rootSurfaceId, workspace.surfaceId].map(id => [id, saved.compositor.surfaces[id]]))
-    const initialState = { ...saved, compositor: { ...saved.compositor, surfaces } }
-    const restored = residenceFixture({ initialState })
-    expect(restored.workspace.surfaceId).toBe(workspace.surfaceId)
-    expect(restored.deck.surfaceId).not.toBe(deck.surfaceId)
-    expect(restored.children(restored.deck.surfaceId)).toHaveLength(2)
-  })
-
-  it('restores a Deck with a missing resident by supplying just that occurrence', () => {
-    const { children, deck, engine } = residenceFixture()
-    const [missing, retained] = children(deck.surfaceId)
-    const saved = engine.getState()
-    const { [missing.surfaceId]: omitted, ...surfaces } = saved.compositor.surfaces
-    const initialState = { ...saved, compositor: { ...saved.compositor, surfaces } }
-    const restored = residenceFixture({ initialState })
-    const residents = restored.children(restored.deck.surfaceId)
-    expect(restored.deck.surfaceId).toBe(deck.surfaceId)
-    expect(residents.find(({ application }) => application.applicationName === 'root/workspace/other').surfaceId)
-      .toBe(retained.surfaceId)
-    expect(residents.find(({ application }) => application.applicationName === 'root/workspace/child').surfaceId)
-      .not.toBe(missing.surfaceId)
+  it.each(['Deck', 'member'])('preserves a missing resident %s and independent state on load', kind => {
+    const { Root, children, deck, engine, workspace } = residenceFixture()
+    const member = children(deck.surfaceId)[0]
+    const container = kind === 'Deck' ? workspace : deck
+    const missing = kind === 'Deck' ? deck : member
+    const dumped = JSON.parse(JSON.stringify(engine.getState()))
+    delete dumped.compositor.surfaces[missing.surfaceId]
+    dumped.compositor.surfaces[container.surfaceId].selectedChildSurfaceId = null
+    const serialized = JSON.stringify(dumped)
+    const restored = AppletEngine.create({ applet: Root, desktopEnvironment, options: { initialState: Object.freeze(dumped) } })
+    residenceEngines.push(restored)
+    expect(restored.getState()).toBe(dumped)
+    expect(restored.compositor.surface.read(missing)).toBeUndefined()
+    expect(restored.compositor.application.read(missing.application)).toBe(dumped.compositor.applications[missing.applicationId])
+    expect(JSON.stringify(restored.getState())).toBe(serialized)
   })
 })
 

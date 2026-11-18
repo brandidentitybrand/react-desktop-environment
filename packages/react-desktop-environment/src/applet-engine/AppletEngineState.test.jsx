@@ -243,7 +243,6 @@ describe('native Applet state', () => {
       stateName: 'newChoice',
     })).toBe('default')
     expect(restored.getState().appletState[restored.rootApplicationId]).toEqual({
-      newChoice: 'default',
       selection: 'saved',
     })
   })

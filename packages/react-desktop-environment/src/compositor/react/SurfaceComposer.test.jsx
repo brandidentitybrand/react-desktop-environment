@@ -6,6 +6,45 @@ import createCompositor from '../createCompositor.js'
 import SurfaceComposer from './SurfaceComposer.jsx'
 
 describe('SurfaceComposer', () => {
+  it('renders the supplied Application and Window records and preserves the input Surface', () => {
+    const context = createContext(null)
+    function Application({ title }) {
+      return <output>{title} / {useContext(context).props.title}</output>
+    }
+    function Surface({ application, window, children }) {
+      return <section aria-label={application.props.title} data-parent={window.parentWindowId}>{children}</section>
+    }
+    const options = { applicationRegistry: { Application }, surfaceComponentRegistry: { Surface },
+      defaultSurfaceComponentName: 'Surface' }
+    const manager = createWindowManager()
+    const source = createCompositor({ ...options, windowManager: manager })
+    const open = title => {
+      const window = manager.window.add({ window: manager.window.create() })
+      const application = source.application.add({ application: source.application.create({
+        applicationName: 'Application', props: { title },
+      }) })
+      return source.surface.add({ surface: source.surface.create({ windowId: window.windowId, applicationId: application.applicationId }) })
+    }
+    const parent = open('Root')
+    const child = open('Before edit')
+    const state = JSON.parse(JSON.stringify({ compositor: source.getSnapshot(), windowManager: manager.getSnapshot() }))
+    state.compositor.applications[child.applicationId].props.title = 'Updated title'
+    state.windowManager.windows[child.windowId].parentWindowId = parent.windowId
+    state.compositor.surfaces[parent.surfaceId].selectedChildSurfaceId = child.surfaceId
+    const original = JSON.stringify(state)
+    const windowManager = createWindowManager({ initialSnapshot: state.windowManager })
+    const restored = createCompositor({ ...options, windowManager, initialSnapshot: state.compositor })
+    const view = render(<SurfaceComposer compositor={restored} surfaceId={parent.surfaceId} applicationContext={context} />)
+    try {
+      expect(view.getByLabelText('Updated title').dataset.parent).toBe(parent.windowId)
+      expect(view.getByText('Updated title / Updated title')).toBeDefined()
+      expect(restored.surface.readSelectedChild(parent)).toBe(state.compositor.surfaces[child.surfaceId])
+      expect(JSON.stringify(state)).toBe(original)
+      act(() => windowManager.window.move({ windowId: child.windowId, parentWindowId: null }))
+      expect(view.queryByLabelText('Updated title')).toBeNull()
+    } finally { view.unmount(); restored.destroy(); source.destroy() }
+  })
+
   it.each([false, true])('resets Application-local state on reassignment with context %s', contextual => {
     const disposed = vi.fn()
     function Application({ application }) {

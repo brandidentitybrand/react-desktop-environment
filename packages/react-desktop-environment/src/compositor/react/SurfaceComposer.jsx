@@ -58,24 +58,20 @@ const SurfaceComposer = memo(function SurfaceComposerComponent({
           surfaceId: surface.surfaceId,
         })
         const ApplicationContext = applicationContext
-        const applicationProps = { ...surface.application.props, controls, surface, window: surface.window, application: surface.application }
+        const application = compositor.application.read(surface)
+        const window = compositor.windowManager.window.read(surface)
+        const applicationProps = { ...application.props, controls, surface, window, application }
         const applicationElement = renderApplication ? renderApplication(ApplicationComponent, applicationProps) : (
-          <ApplicationComponent
-            {...surface.application.props}
-            controls={controls}
-            surface={surface}
-            window={surface.window}
-            application={surface.application}
-          />
+          <ApplicationComponent {...applicationProps} />
         )
         const content = <>
           {ApplicationContext
-            ? <ApplicationContext.Provider key={surface.applicationId} value={surface.application}>{applicationElement}</ApplicationContext.Provider>
+            ? <ApplicationContext.Provider key={surface.applicationId} value={application}>{applicationElement}</ApplicationContext.Provider>
             : <React.Fragment key={surface.applicationId}>{applicationElement}</React.Fragment>}
           {recursive && <SurfaceComposer applicationContext={applicationContext} compositor={compositor}
             surfaceId={surface.surfaceId} renderSurface={renderSurface} renderApplication={renderApplication} />}
         </>
-        const props = { ...surface.props, surface, window: surface.window, application: surface.application,
+        const props = { ...surface.props, surface, window, application,
           hidden: surface.hidden, controls, children: content }
         return <React.Fragment key={surface.surfaceId}>
           {renderSurface ? renderSurface(props) : <SurfaceComponent {...props} />}

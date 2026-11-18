@@ -334,7 +334,7 @@ function constructAppletRuntime({
   }
   const applicationRegistry = collectApplicationRegistry(applet)
   const initialState = options.initialState
-  const state = initialState ?? {}
+  const state = initialState ?? { activeWorkspaceSurfaceId: null }
   const lifecycle = { destroyed: false, emptyDecksScheduled: false, reconcilingResidence: false }
   const reservedIds = new Set([
     ...Object.keys(state.compositor?.applications ?? {}),
@@ -408,7 +408,6 @@ function constructAppletRuntime({
     createId: windowManagerOptions.createId ?? createId,
     initialSnapshot: initialState?.windowManager ?? windowManagerOptions.initialSnapshot,
   })
-  state.activeWorkspaceSurfaceId ??= null
   const suppliedConfigureSurfaceControls = compositorOptions
     .configureSurfaceControls
   const compositor = createCompositor({
@@ -557,12 +556,10 @@ function constructAppletRuntime({
     })
   }
   const { rootSurfaceId, rootWindowId } = state
-  state.appletState ??= {}
-  const appletState = createAppletStateStore({ applications: compositor.getSnapshot().applications, initialState: state.appletState })
+  const appletState = createAppletStateStore({ applications: compositor.getSnapshot().applications, initialState: initialState?.appletState })
   const applicationIds = initialState?.applicationIds ?? Object.freeze(Object.fromEntries(
     Object.entries(applicationInstances).map(([name, application]) => [name, application.applicationId]),
   ))
-  state.applicationIds = applicationIds
   const connectApplicationChildren = (parent, children) => {
     if (!Object.keys(children).length) return parent
     return compositor.application.update({ applicationId: parent.applicationId, props: {
@@ -571,6 +568,8 @@ function constructAppletRuntime({
     } })
   }
   if (!initialState) {
+    state.appletState = appletState.getSnapshot()
+    state.applicationIds = applicationIds
     Object.entries(applicationRegistry).forEach(([name, node]) => {
       applicationInstances[name] = connectApplicationChildren(applicationInstances[name],
         Object.fromEntries(Object.entries(node.children).map(([key, child]) => [key, applicationIds[child]])))
@@ -813,6 +812,7 @@ function constructAppletRuntime({
     },
     ensureAnchorSurface({
       applicationId,
+      createIfMissing = true,
       key,
       workspaceId,
     }) {
@@ -828,9 +828,9 @@ function constructAppletRuntime({
         surfaceId: existing.surfaceId,
       })) {
         anchorSurfaces.set(key, existing)
-        reconcileResidence()
         return compositor.surface.read({ surfaceId: existing.surfaceId })
       }
+      if (!createIfMissing) return undefined
 
       const window = windowManager.window.add({
         window: windowManager.window.create({
@@ -930,7 +930,6 @@ function constructAppletRuntime({
     },
   })
 
-  const restoredResidence = new Set(Object.keys(initialState?.compositor.surfaces ?? {}))
   function reconcileResidence() {
     if (lifecycle.reconcilingResidence) return
     lifecycle.reconcilingResidence = true
@@ -977,8 +976,7 @@ function constructAppletRuntime({
           )
           if (resident) {
             const supply = { surfaceId: containerSurfaceId }
-            const adoptingOrder = restoredResidence.delete(resident.surfaceId)
-            const suppliesOrder = adoptingOrder || eligibleField(
+            const suppliesOrder = eligibleField(
               resident.surfaceId, ['props', 'order'], resident.props.order, supply,
             )
             if (resident.props.order !== request.order && suppliesOrder) {
@@ -986,8 +984,6 @@ function constructAppletRuntime({
                 surfaceId: resident.surfaceId,
                 props: { ...resident.props, order: request.order },
               })
-              suppliedField(resident.surfaceId, ['props', 'order'], request.order, supply)
-            } else if (adoptingOrder) {
               suppliedField(resident.surfaceId, ['props', 'order'], request.order, supply)
             }
             return
@@ -1029,10 +1025,11 @@ function constructAppletRuntime({
       lifecycle.reconcilingResidence = false
     }
   }
-  reconcileResidence()
-
-  state.compositor = compositor.getSnapshot()
-  state.windowManager = windowManager.getSnapshot()
+  if (!initialState) {
+    reconcileResidence()
+    state.compositor = compositor.getSnapshot()
+    state.windowManager = windowManager.getSnapshot()
+  }
   const unsubscribeWindows = windowManager.subscribe(() => {
     state.windowManager = windowManager.getSnapshot()
   })
@@ -1259,8 +1256,9 @@ export function useWhichApplet({ applet, application: suppliedApplication, enabl
       applicationId: application.applicationId,
       key: `resident:${application.applicationId}`,
       workspaceId: applet.meta.applicationName,
+      createIfMissing: !engine.appletState.isRestored(application),
     })
-    setAnchorSurfaceId(anchor.surfaceId)
+    setAnchorSurfaceId(anchor?.surfaceId ?? null)
   }, [application?.applicationId, applet, engine, rootApplication, suppliedSurface])
   return { application, engine, surface }
 }
