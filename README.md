@@ -3,7 +3,7 @@
 This repository is an npm-workspaces monorepo containing a React desktop framework and a separate Vite demo app.
 
 The `react-desktop-environment` library contains a headless window manager, a
-compositor, a recursive Applet runtime with checkpoint recovery, and replaceable
+compositor, a recursive Applet runtime, and replaceable
 React presentation. The window manager owns window
 identity, parent relationships, and lifecycle. The compositor joins windows to
 applications as independently identified Surfaces and owns their presentation

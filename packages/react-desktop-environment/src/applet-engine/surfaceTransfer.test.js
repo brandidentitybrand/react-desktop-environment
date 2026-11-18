@@ -6,7 +6,7 @@ import AppletEngine from './AppletEngine.jsx'
 
 const engines = new Set()
 afterEach(() => {
-  for (const engine of engines) engine.destroy()
+  engines.forEach((engine) => { engine.destroy() })
   engines.clear()
 })
 
@@ -46,7 +46,7 @@ describe('Applet occurrence transfer', () => {
     { edited: false, emptySelection: false },
     { edited: true, emptySelection: false },
     { edited: false, emptySelection: true },
-  ])('cancels only its own checkpoint changes with unrelated edits=$edited and empty selection=$emptySelection', ({ edited, emptySelection }) => {
+  ])('cancels only its own changes with unrelated edits=$edited and empty selection=$emptySelection', ({ edited, emptySelection }) => {
     const { engine, deck, card, peel } = fixture()
     const source = deck()
     const selected = card(source.surfaceId)
@@ -56,18 +56,15 @@ describe('Applet occurrence transfer', () => {
     })
     const state = { applicationId: engine.rootApplicationId, stateName: 'unrelated' }
     engine.appletState.ensure({ ...state, initialValue: 'original' })
-    const clean = engine.checkpoint.capture()
-    engine.checkpoint.markClean(clean)
-    engine.checkpoint.release(clean)
-    const original = engine.checkpoint.getSnapshot()
+    const original = structuredClone(engine.getState())
 
     const transfer = peel(selected.surfaceId)
     if (edited) engine.appletState.write({ ...state, value: 'edited' })
     transfer.cancel()
-    const expected = original.map((entry) => edited && entry.surfaceId === engine.rootSurfaceId
-      ? { ...entry, appletState: { ...entry.appletState, unrelated: 'edited' } } : entry)
-    expect(engine.checkpoint.getSnapshot()).toEqual(expected)
-    expect(engine.checkpoint.isDirty()).toBe(edited)
+    const expected = edited ? { ...original, appletState: {
+      ...original.appletState, [engine.rootApplicationId]: { unrelated: 'edited' },
+    } } : original
+    expect(engine.getState()).toEqual(expected)
   })
 
   it('rejects a cyclic merge before changing any occurrence and permits merging into an ancestor', () => {
@@ -78,10 +75,10 @@ describe('Applet occurrence transfer', () => {
     engine.compositor.surface.readControls({ surfaceId: nested.surfaceId }).reparent(source.surfaceId)
     const target = deck()
     engine.compositor.surface.readControls({ surfaceId: target.surfaceId }).reparent(nested.surfaceId)
-    const original = engine.checkpoint.getSnapshot()
+    const original = structuredClone(engine.getState())
 
     expect(engine.runtime.mergeDeck({ surfaceId: source.surfaceId, targetSurfaceId: target.surfaceId })).toBe(false)
-    expect(engine.checkpoint.getSnapshot()).toEqual(original)
+    expect(engine.getState()).toEqual(original)
     expect(engine.runtime.mergeDeck({ surfaceId: target.surfaceId, targetSurfaceId: source.surfaceId })).toBe(true)
   })
 
@@ -133,7 +130,7 @@ describe('Applet occurrence transfer', () => {
     expect(read(resident.surfaceId).applicationId).toBe(resident.applicationId)
     expect(read(resident.surfaceId).props.resident).toBeUndefined()
     expect(read(transfer.frameSurfaceId)).toMatchObject(geometry)
-    expect(engine.checkpoint.getSnapshot().some(({ surfaceId }) => surfaceId === transfer.frameSurfaceId)).toBe(true)
+    expect(Object.hasOwn(engine.getState().compositor.surfaces, transfer.frameSurfaceId)).toBe(true)
     expect(transfer.cancel()).toBe(false)
   })
 
@@ -145,14 +142,14 @@ describe('Applet occurrence transfer', () => {
     }
     const cancelled = engine.runtime.beginPeel(options)
     const applicationId = read(cancelled.movingSurfaceId).applicationId
-    expect(engine.checkpoint.getSnapshot().some(({ surfaceId }) => surfaceId === cancelled.movingSurfaceId)).toBe(false)
+    expect(Object.hasOwn(engine.getState().compositor.surfaces, cancelled.movingSurfaceId)).toBe(true)
     cancelled.cancel()
     expect(engine.compositor.application.read({ applicationId })).toBeUndefined()
     expect(read(cancelled.frameSurfaceId)).toBeUndefined()
 
     const retained = engine.runtime.beginPeel(options)
     retained.retain()
-    expect(engine.checkpoint.getSnapshot().some(({ surfaceId }) => surfaceId === retained.movingSurfaceId)).toBe(true)
+    expect(Object.hasOwn(engine.getState().compositor.surfaces, retained.movingSurfaceId)).toBe(true)
   })
 
   it('cancels a fullscreen peel without changing its retained floating geometry', () => {
@@ -229,9 +226,9 @@ describe('Applet occurrence transfer', () => {
     expect(children(target.surfaceId).map(({ surfaceId }) => surfaceId).sort())
       .toEqual([existing, ...members].map(({ surfaceId }) => surfaceId).sort())
     expect(engine.runtime.readSelectedChild({ surfaceId: target.surfaceId })?.surfaceId).toBe(selected.surfaceId)
-    for (const member of members) {
+    members.forEach((member) => {
       expect(read(member.surfaceId).applicationId).toBe(member.applicationId)
       expect(read(member.surfaceId).props.resident).toBeUndefined()
-    }
+    })
   })
 })

@@ -17,84 +17,21 @@ import {
   createAppletStateStore,
   immutableJson,
   useAppletState,
-  validateSurfaceState,
 } from './AppletState.js'
 import presentedSurface, { isDeckSurface, surfacePlacementOwnerId } from './presentedSurface.js'
-import { constrainPresentationSize, minimumPresentationSize } from './presentationSize.js'
 import createSurfaceTransfer from './surfaceTransfer.js'
 
 const AppletEngineContext = createContext(null)
 const AppletEngineOwnershipContext = createContext(false)
-let localEngineSequence = 0
-
 const applicationNamePattern = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/
 function freezeRecord(entries) {
   const record = Object.create(null)
-  for (const [key, value] of entries) record[key] = value
+  entries.forEach(([key, value]) => { record[key] = value })
   return Object.freeze(record)
 }
 
 function cloneJson(value, label) {
   return immutableJson(value, label)
-}
-
-function omitUndefinedRuntimeState(value, label) {
-  if (Array.isArray(value)) {
-    return value.map((entry, index) => {
-      if (entry === undefined) {
-        throw new TypeError(`${label}.${index} must be a JSON value`)
-      }
-      return omitUndefinedRuntimeState(entry, `${label}.${index}`)
-    })
-  }
-  if (value === null || typeof value !== 'object') return value
-  const record = Object.create(null)
-  for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key)
-    if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
-      throw new TypeError(`${label}.${String(key)} must use a data property`)
-    }
-    if (descriptor.value === undefined) continue
-    record[key] = omitUndefinedRuntimeState(
-      descriptor.value,
-      `${label}.${String(key)}`,
-    )
-  }
-  return record
-}
-
-function snapshotSurface(surface, { selectedChildSurfaceId } = {}) {
-  const record = Object.create(null)
-  for (const key of Reflect.ownKeys(surface)) {
-    if (
-      key === 'application'
-      || key === 'applicationId'
-      || key === 'window'
-      || key === 'windowId'
-    ) continue
-    const descriptor = Object.getOwnPropertyDescriptor(surface, key)
-    if (!descriptor || !Object.hasOwn(descriptor, 'value')) {
-      throw new TypeError(`Surface ${surface.surfaceId} must use data properties`)
-    }
-    if (descriptor.value === undefined) continue
-    if (key === 'selectedChildSurfaceId' && selectedChildSurfaceId !== undefined) {
-      record[key] = selectedChildSurfaceId
-    } else {
-      record[key] = omitUndefinedRuntimeState(
-        descriptor.value,
-        `Surface ${surface.surfaceId}.${String(key)}`,
-      )
-    }
-  }
-  return cloneJson(record, `Surface ${surface.surfaceId}`)
-}
-
-function orderSurfaces(surfaces, rootSurfaceId) {
-  return surfaces.toSorted((first, second) => {
-    if (first.surfaceId === rootSurfaceId) return -1
-    if (second.surfaceId === rootSurfaceId) return 1
-    return first.surfaceId.localeCompare(second.surfaceId)
-  })
 }
 
 function requireApplicationSegment(value, label) {
@@ -107,20 +44,9 @@ function requireApplicationSegment(value, label) {
 }
 
 function createRuntimeIdFactory() {
-  const engineSequence = ++localEngineSequence
-  let recordSequence = 0
-
   return (kind = 'record') => {
-    if (typeof globalThis.crypto?.randomUUID === 'function') {
-      try {
-        return `${kind}:${globalThis.crypto.randomUUID()}`
-      } catch {
-        // Some browsers expose randomUUID but reject it outside a secure origin.
-      }
-    }
-
-    recordSequence += 1
-    return `${kind}:applet-${engineSequence}-${recordSequence}`
+    const id = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2)
+    return `${kind}:${id}`
   }
 }
 
@@ -213,9 +139,9 @@ function collectApplicationRegistry(rootApplet) {
         : null,
     }
     ancestors.add(Applet)
-    for (const [childLocalName, ChildApplet] of Object.entries(childApplets)) {
+    Object.entries(childApplets).forEach(([childLocalName, ChildApplet]) => {
       visit(ChildApplet, childLocalName, applicationName)
-    }
+    })
     ancestors.delete(Applet)
   }
 
@@ -231,21 +157,21 @@ function collectApplicationRegistry(rootApplet) {
     if (typeof value !== 'string' || !value.length) {
       throw new TypeError(`${label} must be a relative Applet registry path`)
     }
-    for (const segment of value.split('/')) {
+    value.split('/').forEach((segment) => {
       requireApplicationSegment(segment, label)
-    }
+    })
     const path = `${owner.applicationName}/${value}`
     if (!applicationRegistry[path]) {
       throw new Error(`Unknown recipe Applet: ${path}`)
     }
     return path
   }
-  for (const owner of Object.values(applicationRegistry)) {
+  Object.values(applicationRegistry).forEach((owner) => {
     const recipes = owner.Applet.recipes ?? []
     if (!Array.isArray(recipes)) {
       throw new TypeError(`Applet ${owner.applicationName} recipes must be an array`)
     }
-    for (const source of recipes) {
+    recipes.forEach((source) => {
       if (
         source === null
         || typeof source !== 'object'
@@ -306,14 +232,14 @@ function collectApplicationRegistry(rootApplet) {
         recipe: cloneJson({ name, residents, ...(recipe.addable === undefined ? {} : { addable: recipe.addable }) }, `Recipe ${name}`),
       })
       recipesByWorkspace.set(workspace, workspaceRecipes)
-    }
-  }
-  for (const node of Object.values(applicationRegistry)) {
+    })
+  })
+  Object.values(applicationRegistry).forEach((node) => {
     node.recipes = Object.freeze((recipesByWorkspace.get(node.applicationName) ?? [])
       .sort((first, second) => second.owner.split('/').length - first.owner.split('/').length)
       .map(({ recipe }) => recipe))
     Object.freeze(node)
-  }
+  })
   return Object.freeze(applicationRegistry)
 }
 
@@ -340,18 +266,18 @@ function collectSettingsContributions(applicationRegistry, ownerNodes) {
   const contributions = []
   const settingsApplicationNames = new Set()
 
-  for (const ownerNode of ownerNodes) {
+  ownerNodes.forEach((ownerNode) => {
     const containerNode = resolveRegistryNode(applicationRegistry, ownerNode)
     if (!containerNode) {
       throw new Error('Unknown Settings contribution owner')
     }
-    for (const applicationName of Object.values(containerNode.children)) {
+    Object.values(containerNode.children).forEach((applicationName) => {
       const publisherNode = applicationRegistry[applicationName]
       const settingsApplicationName = publisherNode?.settingsApplicationName
       if (
         !settingsApplicationName
         || settingsApplicationNames.has(settingsApplicationName)
-      ) continue
+      ) return
       const settingsNode = applicationRegistry[settingsApplicationName]
       if (!settingsNode) {
         throw new Error(
@@ -360,8 +286,8 @@ function collectSettingsContributions(applicationRegistry, ownerNodes) {
       }
       settingsApplicationNames.add(settingsApplicationName)
       contributions.push(settingsNode)
-    }
-  }
+    })
+  })
 
   return Object.freeze(contributions)
 }
@@ -378,7 +304,6 @@ function ReferenceSurface({ children }) {
 
 function constructAppletRuntime({
   applet,
-  adoption,
   desktopEnvironment,
   options = {},
   resetRootApplet,
@@ -408,48 +333,21 @@ function constructAppletRuntime({
     )
   }
   const applicationRegistry = collectApplicationRegistry(applet)
-  let destroyed = false
-  const hasCheckpoint = (value) => value != null
-    && (!Array.isArray(value) || value.length > 0)
-  const readSurfaceStateOption = (surfaceState) => hasCheckpoint(surfaceState)
-    ? validateSurfaceState(surfaceState, { applicationRegistry })
-    : null
-  const initialSurfaceState = readSurfaceStateOption(options.initialState)
-  const cleanSurfaceState = readSurfaceStateOption(options.cleanState)
-  const rawSurfaceState = [initialSurfaceState, cleanSurfaceState]
-    .filter(Array.isArray)
-    .flat()
-  const reservedIds = adoption?.reservedIds ?? new Set(rawSurfaceState.flatMap((entry) => [
-    entry.surfaceId,
-    entry.application.applicationId,
-    entry.window.windowId,
-  ]))
-  const suppliedCreateId = adoption?.createId ?? options.createId ?? createRuntimeIdFactory()
-  const defaultIds = adoption?.defaultIds ?? new Map()
-  const defaultSequences = new Map()
-  const createId = (kind) => {
-    let id
-    do id = suppliedCreateId(kind)
-    while (reservedIds.has(id))
+  const initialState = options.initialState
+  const state = initialState ?? {}
+  const lifecycle = { destroyed: false, emptyDecksScheduled: false, reconcilingResidence: false }
+  const reservedIds = new Set([
+    ...Object.keys(state.compositor?.applications ?? {}),
+    ...Object.keys(state.compositor?.surfaces ?? {}),
+    ...Object.keys(state.windowManager?.windows ?? {}),
+  ])
+  const suppliedCreateId = options.createId ?? createRuntimeIdFactory()
+  const createId = kind => {
+    const id = suppliedCreateId(kind)
+    if (reservedIds.has(id)) return createId(kind)
     reservedIds.add(id)
     return id
   }
-  const defaultId = (target, kind) => {
-    const sequence = defaultSequences.get(target) ?? 0
-    defaultSequences.set(target, sequence + 1)
-    const key = `${target}:${sequence}:${kind}`
-    if (!defaultIds.has(key)) defaultIds.set(key, createId(kind))
-    return defaultIds.get(key)
-  }
-  const baselineInput = Object.hasOwn(options, 'cleanState')
-    ? cleanSurfaceState
-    : initialSurfaceState
-  const localOnly = Object.hasOwn(options, 'cleanState')
-    && cleanSurfaceState === null && initialSurfaceState !== null
-  let cleanEntries = null
-  const cleanNamedCandidates = new Map((baselineInput ?? []).map((entry) => [
-    entry.application.applicationId, entry.appletState,
-  ]))
   const fieldSupplies = new Map()
   const ownerKey = (supply) => {
     if (!supply || Object.keys(supply).length !== 1
@@ -462,24 +360,18 @@ function constructAppletRuntime({
     }
     return `${key}:${supply[key]}`
   }
-  const equalValue = (first, second) => JSON.stringify(first) === JSON.stringify(second)
+  const equalValue = (first, second) => {
+    if (Object.is(first, second)) return true
+    if (!first || !second || typeof first !== 'object' || typeof second !== 'object') return false
+    if (Array.isArray(first) !== Array.isArray(second)) return false
+    return Object.keys(first).every(key => equalValue(first[key], second[key]))
+      && Object.keys(second).every(key => Object.hasOwn(first, key) || second[key] === undefined)
+  }
   const fieldPath = (field) => Array.isArray(field) ? field : [field]
   const fieldKey = (surfaceId, field) => JSON.stringify([surfaceId, ...fieldPath(field)])
   const readField = (record, field) => fieldPath(field).reduce(
     (value, key) => value?.[key], record,
   )
-  const replaceField = (record, field, value) => {
-    const [key, ...rest] = fieldPath(field)
-    return {
-      ...record,
-      [key]: rest.length ? replaceField(record?.[key], rest, value) : value,
-    }
-  }
-  const updateCleanEntry = (surfaceId, update) => {
-    if (cleanEntries === null) return
-    cleanEntries = cleanEntries.map((entry) => entry.surfaceId === surfaceId
-      ? cloneJson(update(entry), 'Clean Surface state') : entry)
-  }
   const eligibleField = (surfaceId, field, current, supply, missing = current == null) => {
     const key = fieldKey(surfaceId, field)
     if (!supply) {
@@ -496,15 +388,9 @@ function constructAppletRuntime({
       surfaceId, field: fieldPath(field),
       owner: ownerKey(supply), supply: Object.freeze({ ...supply }), value,
     })
-    updateCleanEntry(surfaceId, (entry) => replaceField(entry, field, value))
+
   }
   const rootApplicationName = applet.meta?.applicationName
-  const restoredRootEntry = initialSurfaceState?.find((entry) => (
-    entry.application.root === true
-    && entry.application.applicationName === rootApplicationName
-    && entry.window.parentWindowId === null
-  ))
-  const restoredSurfaceState = restoredRootEntry ? initialSurfaceState : null
   const windowManagerOptions = options.windowManager ?? {}
   const compositorOptions = options.compositor ?? {}
 
@@ -520,37 +406,14 @@ function constructAppletRuntime({
   const windowManager = createWindowManager({
     ...windowManagerOptions,
     createId: windowManagerOptions.createId ?? createId,
-    ...(restoredSurfaceState ? {
-      initialSnapshot: {
-        windows: Object.fromEntries(restoredSurfaceState.map(({ window }) => [
-          window.windowId,
-          window,
-        ])),
-      },
-    } : {}),
+    initialSnapshot: initialState?.windowManager ?? windowManagerOptions.initialSnapshot,
   })
-  let applicationCleanupDirty = false
-  let activeWorkspaceSurfaceId = restoredSurfaceState?.find(
-    ({ activeWorkspace }) => activeWorkspace === true,
-  )?.surfaceId ?? null
-  let checkpointCoordinator
-  let compositor
-  const checkpointListeners = new Set()
-  let cachedSurfaceState = null
-  let checkpointNotificationScheduled = false
-  const notifyCheckpoint = () => {
-    cachedSurfaceState = null
-    if (checkpointNotificationScheduled) return
-    checkpointNotificationScheduled = true
-    queueMicrotask(() => {
-      checkpointNotificationScheduled = false
-      checkpointListeners.forEach((listener) => listener())
-    })
-  }
+  state.activeWorkspaceSurfaceId ??= null
   const suppliedConfigureSurfaceControls = compositorOptions
     .configureSurfaceControls
-  compositor = createCompositor({
+  const compositor = createCompositor({
     ...compositorOptions,
+    initialSnapshot: initialState?.compositor ?? compositorOptions.initialSnapshot,
     applicationRegistry: applicationComponentRegistry,
     createId: compositorOptions.createId ?? createId,
     defaultSurfaceComponentName,
@@ -615,8 +478,8 @@ function constructAppletRuntime({
           ...Object.fromEntries(fields.map((field) => [field, geometry[field]])),
         })
         const resized = compositor.surface.read({ surfaceId })
-        for (const field of fields) suppliedField(surfaceId, field, resized[field], supply)
-        notifyCheckpoint()
+        fields.forEach((field) => { suppliedField(surfaceId, field, resized[field], supply) })
+
         return result
       }
       const selectChild = (childSurfaceId) => runtime.selectChild({ surfaceId, childSurfaceId })
@@ -635,12 +498,6 @@ function constructAppletRuntime({
       })
       return {
         activate,
-        close() {
-          applicationCleanupDirty = true
-          const result = controls.close()
-          collectUnreferencedApplications()
-          return result
-        },
         fullscreen,
         reparent,
         focus: controls.focus,
@@ -657,123 +514,28 @@ function constructAppletRuntime({
       }
     },
   })
-  const mutableApplicationInstances = Object.create(null)
-  let rootWindow
-  let rootApplication
-  let rootSurface
-  const restoredApplicationState = Object.create(null)
-  const restoredApplicationMetadata = new Map()
-
-  if (restoredSurfaceState) {
-    for (const entry of restoredSurfaceState) {
-      const record = entry.application
-      if (restoredApplicationMetadata.has(record.applicationId)) continue
-      restoredApplicationMetadata.set(record.applicationId, record)
-      restoredApplicationState[record.applicationId] = entry.appletState
-    }
-    for (const [applicationName] of Object.entries(applicationRegistry)) {
-      const saved = [...restoredApplicationMetadata.values()].find((record) => (
-        record.permanent === true
-        && record.applicationName === applicationName
-      ))
-      const application = compositor.application.add({
-        application: compositor.application.create({
-          applicationId: saved?.applicationId ?? defaultId(`application:${applicationName}`, 'application'),
-          applicationName,
-          ...(applicationName === rootApplicationName
-            ? { props: options.rootApplicationProps }
-            : {}),
-        }),
-      })
-      mutableApplicationInstances[applicationName] = application
-    }
-    for (const record of restoredApplicationMetadata.values()) {
-      if (record.permanent === true) continue
-      compositor.application.add({
-        application: compositor.application.create({
-          applicationId: record.applicationId,
-          applicationName: record.applicationName,
-        }),
-      })
-    }
-    rootWindow = windowManager.window.read({
-      windowId: restoredRootEntry.window.windowId,
+  const applicationInstances = Object.create(null)
+  if (initialState) {
+    Object.entries(initialState.applicationIds).forEach(([name, applicationId]) => {
+      applicationInstances[name] = compositor.application.read({ applicationId })
     })
-    rootApplication = mutableApplicationInstances[rootApplicationName]
-    if (!rootWindow || rootApplication?.applicationName !== rootApplicationName) {
-      throw new Error('Restored workspace root does not match this Applet')
-    }
-    for (const entry of restoredSurfaceState) {
-      const {
-        activeWorkspace: _activeWorkspace,
-        appletState: _appletState,
-        application,
-        window,
-        ...surfaceState
-      } = entry
-      const restoredSurface = compositor.surface.add({
-        surface: compositor.surface.create({
-          ...surfaceState,
-          applicationId: application.applicationId,
-          selectedChildSurfaceId: null,
-          windowId: window.windowId,
-        }),
-      })
-      if (
-        surfaceState.attentionRevision !== undefined
-        || surfaceState.restoreGeometry !== undefined
-      ) {
-        compositor.surface.update({
-          surfaceId: restoredSurface.surfaceId,
-          ...(surfaceState.attentionRevision === undefined ? {} : {
-            attentionRevision: surfaceState.attentionRevision,
-          }),
-          ...(surfaceState.restoreGeometry === undefined ? {} : {
-            restoreGeometry: surfaceState.restoreGeometry,
-          }),
-        })
-      }
-    }
-    for (const entry of restoredSurfaceState) {
-      if (entry.selectedChildSurfaceId == null) continue
-      const parent = compositor.surface.read({ surfaceId: entry.surfaceId })
-      const child = compositor.surface.read({
-        surfaceId: entry.selectedChildSurfaceId,
-      })
-      if (parent && child?.window?.parentWindowId === parent.windowId) {
-        compositor.surface.selectChild({
-          childSurfaceId: child.surfaceId,
-          surfaceId: parent.surfaceId,
-        })
-      }
-    }
-    rootSurface = compositor.surface.read({
-      surfaceId: restoredRootEntry.surfaceId,
-    })
-    if (
-      !rootSurface
-      || rootSurface.windowId !== rootWindow.windowId
-      || rootSurface.applicationId !== rootApplication.applicationId
-    ) {
-      throw new Error('Restored workspace root Surface is invalid')
-    }
   } else {
-    rootWindow = windowManager.window.add({
+    const rootWindow = windowManager.window.add({
       window: windowManager.window.create({
         ...options.rootWindow,
-        windowId: options.rootWindow?.windowId ?? defaultId('root-window', 'window'),
+        windowId: options.rootWindow?.windowId ?? createId('window'),
       }),
     })
-    rootApplication = compositor.application.add({
+    const rootApplication = compositor.application.add({
       application: compositor.application.create({
-        applicationId: defaultId(`application:${rootApplicationName}`, 'application'),
+        applicationId: createId('application'),
         applicationName: rootApplicationName,
         props: options.rootApplicationProps,
       }),
     })
-    rootSurface = compositor.surface.add({
+    const rootSurface = compositor.surface.add({
       surface: compositor.surface.create({
-        surfaceId: defaultId('root-surface', 'surface'),
+        surfaceId: createId('surface'),
         applicationId: rootApplication.applicationId,
         props: {},
         surfaceComponentName: defaultSurfaceComponentName,
@@ -781,69 +543,43 @@ function constructAppletRuntime({
         workspaceId: options.rootWorkspaceId ?? rootApplicationName,
       }),
     })
-    mutableApplicationInstances[rootApplicationName] = rootApplication
-    for (const applicationName of Object.keys(applicationRegistry)) {
-      if (applicationName === rootApplicationName) continue
-      mutableApplicationInstances[applicationName] = compositor.application.add({
+    state.rootSurfaceId = rootSurface.surfaceId
+    state.rootWindowId = rootWindow.windowId
+    applicationInstances[rootApplicationName] = rootApplication
+    Object.keys(applicationRegistry).forEach((applicationName) => {
+      if (applicationName === rootApplicationName) return
+      applicationInstances[applicationName] = compositor.application.add({
         application: compositor.application.create({
-          applicationId: defaultId(`application:${applicationName}`, 'application'),
+          applicationId: createId('application'),
           applicationName,
         }),
       })
-    }
+    })
   }
-  const applicationInstances = Object.freeze(mutableApplicationInstances)
-  const appletState = createAppletStateStore({
-    applications: compositor.getSnapshot().applications,
-    initialState: restoredApplicationState,
-    getCleanState: (applicationId) => cleanEntries === null
-      ? undefined : cleanNamedCandidates.get(applicationId) ?? {},
-    onCleanStateChange({ applicationId, state }) {
-      if (cleanEntries === null) return
-      cleanEntries = cleanEntries.map((entry) => entry.application.applicationId === applicationId
-        ? cloneJson({ ...entry, appletState: state }, 'Clean Surface state') : entry)
-    },
-  })
-  const unsubscribeAppletState = appletState.subscribeCheckpoint(notifyCheckpoint)
-  const permanentApplicationIds = new Set(
-    Object.values(applicationInstances).map(({ applicationId }) => applicationId),
-  )
-  const dynamicApplicationIds = new Set(
-    Object.keys(compositor.getSnapshot().applications).filter(
-      (applicationId) => !permanentApplicationIds.has(applicationId),
-    ),
-  )
-  const transientApplicationIds = new Set()
-  const retainedApplicationIds = new Set()
-  const childApplicationIds = new Map()
-  const parentApplicationIds = new Map()
-  const connectApplicationChildren = (parentApplication, childApplications) => {
-    const children = new Map()
-    for (const [localName, childApplication] of Object.entries(
-      childApplications,
-    )) {
-      children.set(localName, childApplication.applicationId)
-      parentApplicationIds.set(
-        childApplication.applicationId,
-        parentApplication.applicationId,
-      )
-    }
-    childApplicationIds.set(parentApplication.applicationId, children)
+  const { rootSurfaceId, rootWindowId } = state
+  state.appletState ??= {}
+  const appletState = createAppletStateStore({ applications: compositor.getSnapshot().applications, initialState: state.appletState })
+  const applicationIds = initialState?.applicationIds ?? Object.freeze(Object.fromEntries(
+    Object.entries(applicationInstances).map(([name, application]) => [name, application.applicationId]),
+  ))
+  state.applicationIds = applicationIds
+  const connectApplicationChildren = (parent, children) => {
+    if (!Object.keys(children).length) return parent
+    return compositor.application.update({ applicationId: parent.applicationId, props: {
+      ...parent.props,
+      childApplicationIds: { ...children, ...parent.props.childApplicationIds },
+    } })
   }
-  for (const [applicationName, node] of Object.entries(applicationRegistry)) {
-    const parentApplication = applicationInstances[applicationName]
-    connectApplicationChildren(parentApplication, Object.fromEntries(
-      Object.entries(node.children).map(([localName, childApplicationName]) => [
-        localName,
-        applicationInstances[childApplicationName],
-      ]),
-    ))
+  if (!initialState) {
+    Object.entries(applicationRegistry).forEach(([name, node]) => {
+      applicationInstances[name] = connectApplicationChildren(applicationInstances[name],
+        Object.fromEntries(Object.entries(node.children).map(([key, child]) => [key, applicationIds[child]])))
+    })
   }
   const createApplicationBranch = (applicationName, {
     props,
     savedState,
-    transient = false,
-    supplyTarget,
+    supplied = false,
   } = {}) => {
     const node = applicationRegistry[applicationName]
     if (!node) throw new Error(`Unknown Applet application: ${applicationName}`)
@@ -851,117 +587,22 @@ function constructAppletRuntime({
       application: compositor.application.create({
         applicationName,
         props,
-        ...(supplyTarget ? { applicationId: defaultId(supplyTarget, 'application') } : {}),
+        ...(supplied ? { applicationId: createId('application') } : {}),
       }),
     })
-    dynamicApplicationIds.add(application.applicationId)
-    if (transient) transientApplicationIds.add(application.applicationId)
     appletState.addApplication(application, {
       savedState,
-      ...(supplyTarget && savedState ? { supply: { applicationId: application.applicationId } } : {}),
+      ...(supplied && savedState ? { supply: { applicationId: application.applicationId } } : {}),
     })
-    if (supplyTarget && savedState) cleanNamedCandidates.set(application.applicationId, savedState)
-    connectApplicationChildren(application, Object.fromEntries(
-      Object.entries(node.children).map(([localName, childApplicationName]) => [
-        localName,
-        createApplicationBranch(childApplicationName, {
-          transient,
-          ...(supplyTarget ? { supplyTarget: `${supplyTarget}/${localName}` } : {}),
-        }),
-      ]),
-    ))
-    return application
-  }
-  if (restoredSurfaceState) {
-    const connectRestoredBranch = (application, ancestors = new Set()) => {
-      if (ancestors.has(application.applicationId)) return
-      const node = applicationRegistry[application.applicationName]
-      if (!node) return
-      const nextAncestors = new Set(ancestors).add(application.applicationId)
-      const childApplications = Object.fromEntries(
-        Object.entries(node.children).map(([localName, applicationName]) => {
-          const saved = [...restoredApplicationMetadata.values()].find(
-            (record) => (
-              record.parentApplicationId === application.applicationId
-              && record.localName === localName
-              && record.applicationName === applicationName
-            ),
-          )
-          const child = saved
-            ? compositor.application.read({ applicationId: saved.applicationId })
-            : createApplicationBranch(applicationName)
-          if (saved) connectRestoredBranch(child, nextAncestors)
-          return [localName, child]
-        }),
-      )
-      connectApplicationChildren(application, childApplications)
-    }
-    for (const applicationId of dynamicApplicationIds) {
-      const metadata = restoredApplicationMetadata.get(applicationId)
-      if (
-        metadata?.parentApplicationId
-        && dynamicApplicationIds.has(metadata.parentApplicationId)
-      ) continue
-      const application = compositor.application.read({ applicationId })
-      if (application) connectRestoredBranch(application)
-    }
+    const children = Object.fromEntries(Object.entries(node.children).map(([name, childName]) => [
+      name, props?.childApplicationIds?.[name] ?? createApplicationBranch(childName, {
+        supplied,
+      }).applicationId,
+    ]))
+    const parent = connectApplicationChildren(application, children)
+    return parent
   }
   const anchorSurfaces = new Map()
-  let reconcileResidence = () => {}
-  const shakeApplications = () => {
-    const reachable = new Set([
-      ...permanentApplicationIds,
-      ...retainedApplicationIds,
-      ...Object.values(compositor.getSnapshot().surfaces).map(
-        ({ applicationId }) => applicationId,
-      ),
-    ])
-    const pending = [...reachable]
-    while (pending.length) {
-      const applicationId = pending.pop()
-      const related = [
-        ...(childApplicationIds.get(applicationId)?.values() ?? []),
-        parentApplicationIds.get(applicationId),
-      ]
-      for (const relatedApplicationId of related) {
-        if (!relatedApplicationId || reachable.has(relatedApplicationId)) continue
-        reachable.add(relatedApplicationId)
-        pending.push(relatedApplicationId)
-      }
-    }
-
-    const removedApplicationIds = [...dynamicApplicationIds].filter(
-      (applicationId) => !reachable.has(applicationId),
-    )
-    for (const applicationId of removedApplicationIds) {
-      compositor.application.remove({ applicationId })
-      appletState.removeApplication({ applicationId })
-      dynamicApplicationIds.delete(applicationId)
-      transientApplicationIds.delete(applicationId)
-      retainedApplicationIds.delete(applicationId)
-      childApplicationIds.delete(applicationId)
-      parentApplicationIds.delete(applicationId)
-    }
-    if (removedApplicationIds.length) {
-      const removed = new Set(removedApplicationIds)
-      for (const children of childApplicationIds.values()) {
-        for (const [localName, applicationId] of children) {
-          if (removed.has(applicationId)) children.delete(localName)
-        }
-      }
-      notifyCheckpoint()
-    }
-    return Object.freeze(removedApplicationIds)
-  }
-  const collectUnreferencedApplications = () => {
-    if (!applicationCleanupDirty) return Object.freeze([])
-    applicationCleanupDirty = false
-    return shakeApplications()
-  }
-  if (restoredSurfaceState) {
-    applicationCleanupDirty = true
-    collectUnreferencedApplications()
-  }
   const resolveApplicationNode = (applicationOrName) => (
     resolveRegistryNode(applicationRegistry, applicationOrName)
   )
@@ -969,24 +610,15 @@ function constructAppletRuntime({
   const supplyOccurrence = (surfaceId, supply) => {
     ownerKey(supply)
     const surface = compositor.surface.read({ surfaceId })
-    for (const field of ['position', 'size', 'selectedChildSurfaceId', 'fullscreen', ['props', 'order']]) {
+    const fields = ['position', 'size', 'selectedChildSurfaceId', 'fullscreen', ['props', 'order']]
+    fields.forEach((field) => {
       const value = readField(surface, field)
       if (value != null) suppliedField(surfaceId, field, value, supply)
-    }
-    if (cleanEntries === null) return
-    cachedSurfaceState = null
-    const entry = readSurfaceState().find((candidate) => candidate.surfaceId === surfaceId)
-    if (!entry) return
-    if (!cleanNamedCandidates.has(entry.application.applicationId)) {
-      cleanNamedCandidates.set(entry.application.applicationId, entry.appletState)
-    }
-    cleanEntries = [
-      ...cleanEntries.filter((candidate) => candidate.surfaceId !== surfaceId), entry,
-    ]
+    })
+
   }
   const retainedDecks = new Map()
   const emptyDecks = new Set()
-  let emptyDecksScheduled = false
   const queryEngine = () => ({ compositor, runtime })
   const readChildStack = ({ surfaceId, fullscreen } = {}) => {
     if (!compositor.surface.read({ surfaceId })) return []
@@ -1009,7 +641,7 @@ function constructAppletRuntime({
     return readChildStack({ surfaceId, fullscreen })[0] ?? null
   }
   const reconcileSelections = (previous) => {
-    for (const owner of Object.values(compositor.getSnapshot().surfaces)) {
+    Object.values(compositor.getSnapshot().surfaces).forEach((owner) => {
       const oldOwner = previous?.surfaces[owner.surfaceId]
       const oldSelection = previous?.surfaces[oldOwner?.selectedChildSurfaceId]
       const oldChild = oldSelection && compositor.surface.read({ surfaceId: oldSelection.surfaceId })
@@ -1020,36 +652,36 @@ function constructAppletRuntime({
       const arrived = compositor.surface.readChildren({ surfaceId: owner.surfaceId }).some((child) => (
         previous?.surfaces[child.surfaceId]?.window.parentWindowId !== owner.windowId
       ))
-      if (!departed && (owner.selectedChildSurfaceId != null || !arrived)) continue
+      if (!departed && (owner.selectedChildSurfaceId != null || !arrived)) return
       const mountedDeparture = departed && oldSelection.fullscreen
       const selected = readSelectedChild({
         surfaceId: owner.surfaceId,
         ...(mountedDeparture ? { fullscreen: true } : {}),
       })
-      if (selected && selected.window.parentWindowId !== owner.windowId) continue
+      if (selected && selected.window.parentWindowId !== owner.windowId) return
       const childSurfaceId = selected?.surfaceId ?? null
-      if (childSurfaceId === owner.selectedChildSurfaceId) continue
+      if (childSurfaceId === owner.selectedChildSurfaceId) return
       compositor.surface.selectChild({ surfaceId: owner.surfaceId, childSurfaceId })
       if (departed || retainedDecks.has(owner.surfaceId)) fieldSupplies.delete(fieldKey(owner.surfaceId, 'selectedChildSurfaceId'))
       else suppliedField(owner.surfaceId, 'selectedChildSurfaceId', childSurfaceId, { surfaceId: owner.surfaceId })
-    }
+    })
   }
   const flushEmptyDecks = () => {
-    emptyDecksScheduled = false
-    if (destroyed) return
-    for (const surfaceId of emptyDecks) {
-      if (retainedDecks.get(surfaceId)?.size) continue
+    lifecycle.emptyDecksScheduled = false
+    if (lifecycle.destroyed) return
+    emptyDecks.forEach((surfaceId) => {
+      if (retainedDecks.get(surfaceId)?.size) return
       emptyDecks.delete(surfaceId)
       const surface = compositor.surface.read({ surfaceId })
       if (!surface || !isDeckSurface({ engine: queryEngine(), surface })
         || Array.isArray(surface.props?.recipe?.residents)
-        || compositor.surface.readChildren({ surfaceId }).length) continue
+        || compositor.surface.readChildren({ surfaceId }).length) return
       compositor.surface.readControls({ surfaceId }).close()
-    }
+    })
   }
   const scheduleEmptyDecks = () => {
-    if (emptyDecksScheduled || destroyed) return
-    emptyDecksScheduled = true
+    if (lifecycle.emptyDecksScheduled || lifecycle.destroyed) return
+    lifecycle.emptyDecksScheduled = true
     queueMicrotask(flushEmptyDecks)
   }
   const retainDeck = (surfaceId, { selectedSurfaceId } = {}) => {
@@ -1064,7 +696,6 @@ function constructAppletRuntime({
       scheduleEmptyDecks()
     }
   }
-  let surfaceTransfer
   const runtime = Object.freeze({
     readChildStack,
     readSelectedChild,
@@ -1084,28 +715,24 @@ function constructAppletRuntime({
       return surfaceTransfer.mergeDeck(options)
     },
     activeWorkspaceSurface() {
-      return activeWorkspaceSurfaceId
-        ? compositor.surface.read({ surfaceId: activeWorkspaceSurfaceId })
+      return state.activeWorkspaceSurfaceId
+        ? compositor.surface.read({ surfaceId: state.activeWorkspaceSurfaceId })
           ?? null
         : null
     },
     activateWorkspaceSurface({ surfaceId, supply }) {
       const surface = compositor.surface.read({ surfaceId })
       if (!surface) throw new Error(`Unknown Workspace Surface: ${surfaceId}`)
-      if (!eligibleField(rootSurface.surfaceId, 'activeWorkspace', activeWorkspaceSurfaceId,
-        supply, !compositor.surface.read({ surfaceId: activeWorkspaceSurfaceId }))) return surface
-      activeWorkspaceSurfaceId = surfaceId
+      if (!eligibleField(rootSurfaceId, 'activeWorkspace', state.activeWorkspaceSurfaceId,
+        supply, !compositor.surface.read({ surfaceId: state.activeWorkspaceSurfaceId }))) return surface
+      state.activeWorkspaceSurfaceId = surfaceId
       if (supply) {
-        fieldSupplies.set(fieldKey(rootSurface.surfaceId, 'activeWorkspace'), {
-          surfaceId: rootSurface.surfaceId, field: ['activeWorkspace'],
+        fieldSupplies.set(fieldKey(rootSurfaceId, 'activeWorkspace'), {
+          surfaceId: rootSurfaceId, field: ['activeWorkspace'],
           owner: ownerKey(supply), supply: Object.freeze({ ...supply }), value: surfaceId,
         })
-        if (cleanEntries !== null) cleanEntries = cleanEntries.map((entry) => {
-          const { activeWorkspace: _activeWorkspace, ...state } = entry
-          return cloneJson({ ...state, ...(entry.surfaceId === surfaceId ? { activeWorkspace: true } : {}) }, 'Clean Surface state')
-        })
       }
-      notifyCheckpoint()
+
       return surface
     },
     selectChild({ surfaceId, childSurfaceId, supply }) {
@@ -1123,7 +750,7 @@ function constructAppletRuntime({
         compositor.surface.activateChild({ surfaceId, childSurfaceId })
       }
       suppliedField(surfaceId, 'selectedChildSurfaceId', childSurfaceId, supply)
-      notifyCheckpoint()
+
       return compositor.surface.read({ surfaceId })
     },
     selectionSupply({ surfaceId }) {
@@ -1152,9 +779,7 @@ function constructAppletRuntime({
           `Unknown child application ${localName} of ${parentNode.applicationName}`,
         )
       }
-      const childApplicationId = childApplicationIds
-        .get(parentApplication.applicationId)
-        ?.get(localName)
+      const childApplicationId = compositor.application.read(parentApplication)?.props.childApplicationIds?.[localName]
       if (!childApplicationId) {
         throw new Error(
           `Missing child application ${localName} of ${parentApplication.applicationId}`,
@@ -1167,7 +792,6 @@ function constructAppletRuntime({
       applicationName,
       cloneState = false,
       props,
-      transient = false,
     } = {}) {
       const source = applicationId
         ? compositor.application.read({ applicationId })
@@ -1179,26 +803,12 @@ function constructAppletRuntime({
           savedState: source && cloneState
             ? appletState.snapshot(source.applicationId)
             : undefined,
-          transient,
         },
       )
-      retainedApplicationIds.add(application.applicationId)
-      notifyCheckpoint()
+
       return application
     },
     retainApplicationInstance({ applicationId }) {
-      if (!dynamicApplicationIds.has(applicationId)) {
-        throw new Error(`Unknown dynamic Application: ${applicationId}`)
-      }
-      const pending = [applicationId]
-      while (pending.length) {
-        const currentApplicationId = pending.pop()
-        transientApplicationIds.delete(currentApplicationId)
-        pending.push(...(
-          childApplicationIds.get(currentApplicationId)?.values() ?? []
-        ))
-      }
-      notifyCheckpoint()
       return compositor.application.read({ applicationId })
     },
     ensureAnchorSurface({
@@ -1212,7 +822,7 @@ function constructAppletRuntime({
         surface.applicationId === applicationId
         && surface.workspaceId === workspaceId
         && surface.window?.parentWindowId === null
-        && surface.surfaceId !== rootSurface.surfaceId
+        && surface.surfaceId !== rootSurfaceId
       ))
       if (existing && compositor.surface.read({
         surfaceId: existing.surfaceId,
@@ -1224,12 +834,12 @@ function constructAppletRuntime({
 
       const window = windowManager.window.add({
         window: windowManager.window.create({
-          windowId: defaultId(`anchor:${key}`, 'window'), parentWindowId: null,
+          windowId: createId('window'), parentWindowId: null,
         }),
       })
       const surface = compositor.surface.add({
         surface: compositor.surface.create({
-          surfaceId: defaultId(`anchor:${key}`, 'surface'),
+          surfaceId: createId('surface'),
           applicationId,
           props: {},
           surfaceComponentName: 'reference',
@@ -1238,9 +848,9 @@ function constructAppletRuntime({
         }),
       })
       anchorSurfaces.set(key, surface)
-      supplyOccurrence(surface.surfaceId, { applicationId: rootApplication.applicationId })
+      supplyOccurrence(surface.surfaceId, { applicationId: applicationIds[rootApplicationName] })
       reconcileResidence()
-      notifyCheckpoint()
+
       return compositor.surface.read({ surfaceId: surface.surfaceId })
     },
     createReferenceSurface({
@@ -1260,18 +870,17 @@ function constructAppletRuntime({
       if (!ownerSurface) {
         throw new Error(`Unknown reference-surface owner: ${ownerSurfaceId}`)
       }
-      const supplyTarget = supply
-        ? `${ownerKey(supply)}:reference:${applicationId}` : null
+      if (supply) ownerKey(supply)
       const window = windowManager.window.add({
         window: windowManager.window.create({
-          ...(supplyTarget ? { windowId: defaultId(supplyTarget, 'window') } : {}),
+          ...(supply ? { windowId: createId('window') } : {}),
           parentWindowId: ownerSurface.windowId,
         }),
       })
       try {
         const surface = compositor.surface.add({
           surface: compositor.surface.create({
-            ...(supplyTarget ? { surfaceId: defaultId(supplyTarget, 'surface') } : {}),
+            ...(supply ? { surfaceId: createId('surface') } : {}),
             applicationId,
             hidden,
             position,
@@ -1285,7 +894,6 @@ function constructAppletRuntime({
             workspaceId: workspaceId ?? ownerSurface.workspaceId,
           }),
         })
-        retainedApplicationIds.delete(applicationId)
         if (supply) supplyOccurrence(surface.surfaceId, supply)
         reconcileResidence()
         return compositor.surface.read({ surfaceId: surface.surfaceId })
@@ -1303,16 +911,16 @@ function constructAppletRuntime({
       if (!entries.length) return current
       const nextProps = { ...current.props, ...Object.fromEntries(entries) }
       const updated = compositor.surface.update({ surfaceId, props: nextProps })
-      for (const [key, value] of entries) {
+      entries.forEach(([key, value]) => {
         suppliedField(surfaceId, ['props', key], value, supply)
-      }
+      })
       return updated
     },
     resolveApplicationNode,
 
   })
 
-  surfaceTransfer = createSurfaceTransfer({
+  const surfaceTransfer = createSurfaceTransfer({
     compositor,
     runtime,
     retainDeck,
@@ -1322,26 +930,21 @@ function constructAppletRuntime({
     },
   })
 
-  const restoredResidence = new Set((restoredSurfaceState ?? []).map(({ surfaceId }) => surfaceId))
-  let reconcilingResidence = false
-  reconcileResidence = () => {
-    if (reconcilingResidence) return
-    reconcilingResidence = true
+  const restoredResidence = new Set(Object.keys(initialState?.compositor.surfaces ?? {}))
+  function reconcileResidence() {
+    if (lifecycle.reconcilingResidence) return
+    lifecycle.reconcilingResidence = true
     try {
-      const pending = Object.keys(compositor.getSnapshot().surfaces)
-      const visited = new Set()
-      while (pending.length) {
-        const containerSurfaceId = pending.shift()
-        if (visited.has(containerSurfaceId)) continue
-        visited.add(containerSurfaceId)
+      const pending = new Set(Object.keys(compositor.getSnapshot().surfaces))
+      pending.forEach(containerSurfaceId => {
         const container = compositor.surface.read({ surfaceId: containerSurfaceId })
-        if (!container) continue
+        if (!container) return
         const node = applicationRegistry[container.application.applicationName]
         const deck = node.Applet === Deck
         const recipeResidents = deck && Array.isArray(container.props?.recipe?.residents)
           ? container.props.recipe.residents
           : null
-        if (deck && recipeResidents === null) continue
+        if (deck && recipeResidents === null) return
         const requests = deck
           ? recipeResidents.filter((resident) => applicationRegistry[resident.applet])
             .map((resident, order) => ({
@@ -1357,17 +960,17 @@ function constructAppletRuntime({
               order,
               surfaceProps: { recipe, addable: recipe.addable ?? false, unmountable: false },
             }))
-        if (!deck && !requests.length) continue
+        if (!deck && !requests.length) return
         const desiredKeys = new Set(requests.map(({ key }) => key))
-        for (const resident of Object.values(compositor.getSnapshot().surfaces)) {
+        Object.values(compositor.getSnapshot().surfaces).forEach((resident) => {
           if (
             resident.props?.resident?.containerSurfaceId !== containerSurfaceId
             || desiredKeys.has(resident.props.resident.key)
-          ) continue
+          ) return
           compositor.surface.readControls({ surfaceId: resident.surfaceId }).close()
-        }
-        for (const request of requests) {
-          if (!compositor.surface.read({ surfaceId: containerSurfaceId })) break
+        })
+        requests.forEach((request) => {
+          if (!compositor.surface.read({ surfaceId: containerSurfaceId })) return
           const resident = Object.values(compositor.getSnapshot().surfaces).find(
             ({ props }) => props?.resident?.containerSurfaceId === containerSurfaceId
               && props.resident.key === request.key,
@@ -1387,11 +990,11 @@ function constructAppletRuntime({
             } else if (adoptingOrder) {
               suppliedField(resident.surfaceId, ['props', 'order'], request.order, supply)
             }
-            continue
+            return
           }
           const application = createApplicationBranch(request.applicationName, {
             savedState: request.savedState,
-            supplyTarget: `resident:${containerSurfaceId}:${request.key}`,
+            supplied: true,
           })
           const supplied = runtime.createReferenceSurface({
             applicationId: application.applicationId,
@@ -1419,286 +1022,112 @@ function constructAppletRuntime({
               supply: { surfaceId: containerSurfaceId },
             })
           }
-          pending.push(supplied.surfaceId)
-        }
-      }
+          pending.add(supplied.surfaceId)
+        })
+      })
     } finally {
-      reconcilingResidence = false
+      lifecycle.reconcilingResidence = false
     }
   }
   reconcileResidence()
 
-  if (restoredSurfaceState) {
-    const sizingEngine = { compositor, runtime }
-    for (const saved of restoredSurfaceState) {
-      if (!saved.size || saved.fullscreen || saved.surfaceComponentName !== 'reference') continue
-      const surface = compositor.surface.read({ surfaceId: saved.surfaceId })
-      if (!surface) continue
-      const size = constrainPresentationSize(saved.size,
-        minimumPresentationSize({ engine: sizingEngine, surface }))
-      if (size && !equalValue(surface.size, size)) {
-        compositor.surface.update({ surfaceId: surface.surfaceId, size })
-      }
-    }
-  }
-
-  const checkpointCaptures = new WeakMap()
-  const readSurfaceState = () => {
-    if (cachedSurfaceState) return cachedSurfaceState
-    collectUnreferencedApplications()
-    const compositorSnapshot = compositor.getSnapshot()
-    const excludedApplicationIds = new Set(transientApplicationIds)
-    const excludedWindowIds = new Set(
-      Object.values(compositorSnapshot.surfaces)
-        .filter(({ applicationId }) => excludedApplicationIds.has(applicationId))
-        .map(({ windowId }) => windowId),
-    )
-    let foundExcludedWindow = true
-    while (foundExcludedWindow) {
-      foundExcludedWindow = false
-      for (const window of Object.values(windowManager.getSnapshot().windows)) {
-        if (
-          excludedWindowIds.has(window.windowId)
-          || !excludedWindowIds.has(window.parentWindowId)
-        ) continue
-        excludedWindowIds.add(window.windowId)
-        foundExcludedWindow = true
-      }
-    }
-    const windowSnapshot = windowManager.getSnapshot().windows
-    const includedSurfaces = Object.values(compositorSnapshot.surfaces).filter(
-      ({ windowId }) => !excludedWindowIds.has(windowId),
-    )
-    const includedSurfaceIds = new Set(
-      includedSurfaces.map(({ surfaceId }) => surfaceId),
-    )
-    const includedApplicationIds = new Set(
-      includedSurfaces.map(({ applicationId }) => applicationId),
-    )
-    const orderedSurfaces = orderSurfaces(includedSurfaces, rootSurface.surfaceId)
-    cachedSurfaceState = validateSurfaceState(orderedSurfaces.map((surface) => {
-      const application = compositorSnapshot.applications[surface.applicationId]
-      const window = windowSnapshot[surface.windowId]
-      const parentApplicationId = parentApplicationIds.get(
-        application.applicationId,
-      )
-      const localName = parentApplicationId
-        ? [...(childApplicationIds.get(parentApplicationId) ?? [])].find(
-            ([, applicationId]) => applicationId === application.applicationId,
-          )?.[0]
-        : undefined
-      const selectedChildSurfaceId = surface.selectedChildSurfaceId == null
-        ? null
-        : includedSurfaceIds.has(surface.selectedChildSurfaceId)
-          ? surface.selectedChildSurfaceId
-          : null
-      return {
-        ...snapshotSurface(surface, { selectedChildSurfaceId }),
-        ...(surface.surfaceId === activeWorkspaceSurfaceId
-          ? { activeWorkspace: true }
-          : {}),
-        application: {
-          applicationId: application.applicationId,
-          applicationName: application.applicationName,
-          ...(permanentApplicationIds.has(application.applicationId)
-            ? { permanent: true }
-            : {}),
-          ...(application.applicationId === rootApplication.applicationId
-            ? { root: true }
-            : {}),
-          ...(parentApplicationId && localName
-            && includedApplicationIds.has(parentApplicationId)
-            ? { localName, parentApplicationId }
-            : {}),
-        },
-        appletState: appletState.snapshot(application.applicationId),
-        window: cloneJson(window, `Window ${window.windowId}`),
-      }
-    }), { applicationRegistry })
-    return cachedSurfaceState
-  }
-  if (adoption) {
-    adoption.receiveNamedCandidates(cleanNamedCandidates)
-    adoption.receiveRootSurfaceId(rootSurface.surfaceId)
-    const adopted = readSurfaceState()
-    compositor.destroy()
-    return adopted
-  }
-  let cleanRootSurfaceId = rootSurface.surfaceId
-  if (!localOnly) {
-    if (baselineInput !== null) {
-      const cleanOptions = { ...options, initialState: baselineInput }
-      delete cleanOptions.cleanState
-      cleanEntries = constructAppletRuntime({
-        applet,
-      desktopEnvironment,
-        options: cleanOptions,
-        rootApplet,
-              adoption: {
-          createId: suppliedCreateId,
-          defaultIds,
-          reservedIds,
-          receiveRootSurfaceId(surfaceId) {
-            cleanRootSurfaceId = surfaceId
-          },
-          receiveNamedCandidates(candidates) {
-            for (const [id, state] of candidates) cleanNamedCandidates.set(id, state)
-          },
-        },
-      })
-    } else {
-      cleanEntries = readSurfaceState()
-    }
-  }
-  const cleanStateJson = () => cleanEntries === null ? null : JSON.stringify(
-    orderSurfaces(validateSurfaceState(cleanEntries, { applicationRegistry }), cleanRootSurfaceId),
-  )
-  checkpointCoordinator = Object.freeze({
-    capture() {
-      const snapshot = readSurfaceState()
-      const capture = Object.freeze({ snapshot })
-      checkpointCaptures.set(capture, snapshot)
-      return capture
-    },
-    getSnapshot: readSurfaceState,
-    isDirty() {
-      return cleanEntries === null
-        || JSON.stringify(readSurfaceState()) !== cleanStateJson()
-    },
-    markClean(capture) {
-      const captured = checkpointCaptures.get(capture)
-      if (!captured) throw new Error('Unknown Surface state capture')
-      cleanEntries = captured
-      cleanRootSurfaceId = rootSurface.surfaceId
-      cleanNamedCandidates.clear()
-      for (const entry of captured) {
-        cleanNamedCandidates.set(entry.application.applicationId, entry.appletState)
-      }
-      appletState.replaceCleanState(Object.fromEntries(cleanNamedCandidates))
-      notifyCheckpoint()
-      return capture.snapshot
-    },
-    matches(snapshot) {
-      const validated = validateSurfaceState(snapshot, {
-        applicationRegistry,
-      })
-      return JSON.stringify(readSurfaceState()) === JSON.stringify(validated)
-    },
-    release(capture) {
-      if (!checkpointCaptures.has(capture)) return false
-      checkpointCaptures.delete(capture)
-      return true
-    },
-    ...(typeof resetRootApplet === 'function'
-      ? {
-          reset: () => resetRootApplet({
-            beforeResetRootApplet: options.beforeResetRootApplet,
-          }),
-        }
-      : {}),
-    subscribe(listener) {
-      if (typeof listener !== 'function') {
-        throw new TypeError('Surface state listener must be a function')
-      }
-      checkpointListeners.add(listener)
-      return () => checkpointListeners.delete(listener)
-    },
-
+  state.compositor = compositor.getSnapshot()
+  state.windowManager = windowManager.getSnapshot()
+  const unsubscribeWindows = windowManager.subscribe(() => {
+    state.windowManager = windowManager.getSnapshot()
   })
+  const composition = { previous: compositor.getSnapshot(), reconciling: false, pending: false }
 
-  let previousSnapshot = compositor.getSnapshot()
-  let reconcilingComposition = false
-  let compositionPending = false
   const unsubscribeCompositor = compositor.subscribe(() => {
-    if (reconcilingComposition) {
-      compositionPending = true
-      notifyCheckpoint()
+    state.compositor = compositor.getSnapshot()
+    if (composition.reconciling) {
+      composition.pending = true
+
       return
     }
-    reconcilingComposition = true
+    composition.reconciling = true
     try {
-      do {
-        compositionPending = false
+      const reconcile = () => {
+        composition.pending = false
         const current = compositor.getSnapshot()
-        const previous = previousSnapshot
-        previousSnapshot = current
+        const previous = composition.previous
+        composition.previous = current
         const surfaces = Object.values(current.surfaces)
         const previousSurfaces = Object.values(previous.surfaces)
         const removed = previousSurfaces.filter(({ surfaceId }) => !current.surfaces[surfaceId])
-        const applicationIds = new Set(surfaces.map(({ applicationId }) => applicationId))
-        const endedApplications = new Set(removed.map(({ applicationId }) => applicationId)
-          .filter((applicationId) => current.applications[applicationId] && !applicationIds.has(applicationId)))
-        for (const applicationId of endedApplications) {
-          appletState.endApplicationState({ applicationId })
-        }
-        for (const previousChild of previousSurfaces) {
+        Object.keys(previous.applications).forEach((applicationId) => {
+          if (!current.applications[applicationId]) appletState.removeApplication({ applicationId })
+        })
+        Object.values(current.applications).forEach((application) => {
+          if (!previous.applications[application.applicationId]) appletState.addApplication(application)
+        })
+        previousSurfaces.forEach((previousChild) => {
           const child = current.surfaces[previousChild.surfaceId]
-          if (child?.window.parentWindowId === previousChild.window.parentWindowId) continue
+          if (child?.window.parentWindowId === previousChild.window.parentWindowId) return
           const parent = surfaces.find(({ windowId }) => windowId === previousChild.window.parentWindowId)
           if (parent && isDeckSurface({ engine: queryEngine(), surface: parent })
             && !compositor.surface.readChildren({ surfaceId: parent.surfaceId }).length) {
             emptyDecks.add(parent.surfaceId)
           }
-        }
-        for (const [key, declaration] of fieldSupplies) {
+        })
+        fieldSupplies.forEach((declaration, key) => {
           const { field, surfaceId } = declaration
           const surface = current.surfaces[surfaceId]
           const ownerAlive = declaration.supply.surfaceId
             ? current.surfaces[declaration.supply.surfaceId]
-            : applicationIds.has(declaration.supply.applicationId)
-          const value = field.length === 1 && field[0] === 'activeWorkspace' ? activeWorkspaceSurfaceId : readField(surface, field)
+            : current.applications[declaration.supply.applicationId]
+          const value = field.length === 1 && field[0] === 'activeWorkspace' ? state.activeWorkspaceSurfaceId : readField(surface, field)
           if (!surface || !ownerAlive || !equalValue(value, declaration.value)) fieldSupplies.delete(key)
-        }
+        })
         const removedWindows = new Set(removed.map(({ windowId }) => windowId))
-        const pendingWindows = [...removedWindows]
-        while (pendingWindows.length) {
-          const parentWindowId = pendingWindows.pop()
-          for (const child of previousSurfaces) {
-            if (child.window.parentWindowId !== parentWindowId || removedWindows.has(child.windowId)) continue
+        const pendingWindows = removedWindows
+        pendingWindows.forEach(parentWindowId => {
+          previousSurfaces.forEach((child) => {
+            if (child.window.parentWindowId !== parentWindowId || removedWindows.has(child.windowId)) return
             removedWindows.add(child.windowId)
-            pendingWindows.push(child.windowId)
             if (compositor.surface.read({ surfaceId: child.surfaceId })) {
               compositor.surface.readControls({ surfaceId: child.surfaceId }).close()
             }
-          }
-        }
-        if (removed.length) {
-          applicationCleanupDirty = true
-          collectUnreferencedApplications()
-        }
+          })
+        })
         reconcileResidence()
         reconcileSelections(previous)
         if (emptyDecks.size) scheduleEmptyDecks()
-      } while (compositionPending)
+        if (composition.pending) reconcile()
+      }
+      reconcile()
     } finally {
-      reconcilingComposition = false
-      notifyCheckpoint()
+      composition.reconciling = false
+
     }
   })
 
   return Object.freeze({
     destroy() {
-      if (destroyed) return
+      if (lifecycle.destroyed) return
       surfaceTransfer.destroy()
-      destroyed = true
+      lifecycle.destroyed = true
+
+      unsubscribeWindows()
       unsubscribeCompositor()
-      unsubscribeAppletState()
-      checkpointListeners.clear()
+
+
       retainedDecks.clear()
       emptyDecks.clear()
       compositor.destroy()
     },
     appletState,
-    applicationInstances,
+    applicationInstances: Object.freeze(applicationInstances),
     applicationRegistry,
     compositor,
     desktopEnvironment,
-    rootApplicationId: rootApplication.applicationId,
+    rootApplicationId: applicationIds[rootApplicationName],
     rootApplet: RootApplet,
-    rootSurfaceId: rootSurface.surfaceId,
-    rootWindowId: rootWindow.windowId,
+    rootSurfaceId,
+    rootWindowId,
     surfaceComponentRegistry,
-    checkpoint: checkpointCoordinator,
+    getState: () => state,
+    ...(resetRootApplet && { reset: () => resetRootApplet({ beforeResetRootApplet: options.beforeResetRootApplet }) }),
     runtime,
     windowManager,
   })
@@ -1734,8 +1163,7 @@ export default function AppletEngine({
     if (resetOperation.current?.runtimeRevision === runtimeRevision) {
       return resetOperation.current.promise
     }
-    let operation
-    operation = (async () => {
+    const operation = (async () => {
       try {
         await beforeResetRootApplet?.()
         if (activeRuntimeRevision.current !== runtimeRevision) return false
@@ -1753,7 +1181,7 @@ export default function AppletEngine({
     if (!ownsEngine) return null
     const runtimeOptions = runtimeRevision === 0
       ? options
-      : { ...(options ?? {}), initialState: null, cleanState: null }
+      : { ...(options ?? {}), initialState: null }
     const engine = createAppletEngine({
       applet,
       desktopEnvironment,

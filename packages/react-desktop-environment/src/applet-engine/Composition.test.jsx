@@ -50,11 +50,10 @@ function tree({ addable = false } = {}) {
 
 describe('independent Applet composition', () => {
   it('renders the registered Applet with supplied records and inherited state without creating another occurrence', () => {
-    let received
-    let inheritedEngine
+    const observations = {}
     function Note(props) {
-      received = props
-      inheritedEngine = AppletEngine.use()
+      observations.received = props
+      observations.inheritedEngine = AppletEngine.use()
       const [draft, setDraft] = AppletEngine.useState('draft', 'draft')
       return <input aria-label="bound draft" value={draft} onChange={(event) => setDraft(event.target.value)} />
     }
@@ -72,11 +71,11 @@ describe('independent Applet composition', () => {
     const view = render(<AppletEnvironment desktopEnvironment={environment}>
       <AppletEngine applet={Notebook} engine={engine}><AppletPresentation /></AppletEngine>
     </AppletEnvironment>)
-    expect(received.application).toBe(application)
-    expect(received.surface).toBe(surface)
-    expect(inheritedEngine).toBe(engine)
-    expect(received.window).toBe(surface.window)
-    expect(received.controls).toBe(engine.compositor.surface.readControls({ surfaceId: surface.surfaceId }))
+    expect(observations.received.application).toBe(application)
+    expect(observations.received.surface).toBe(surface)
+    expect(observations.inheritedEngine).toBe(engine)
+    expect(observations.received.window).toBe(surface.window)
+    expect(observations.received.controls).toBe(engine.compositor.surface.readControls({ surfaceId: surface.surfaceId }))
     fireEvent.change(view.getByRole('textbox', { name: 'bound draft' }), { target: { value: 'edited' } })
     expect(engine.appletState.read({ applicationId: application.applicationId, stateName: 'draft' })).toBe('edited')
     expect(Object.keys(engine.compositor.getSnapshot().surfaces)).toEqual(initialSurfaces)
@@ -84,12 +83,11 @@ describe('independent Applet composition', () => {
 
   it.each([false, true])('attaches the Applet directly and disposes only its owned runtime (injected=%s)', async (injected) => {
     const tracking = trackedEnvironment()
-    let received
-    let ownsEngine
+    const observations = {}
     function Note(props) {
-      received = Binding.useWhichApplet(props)
-      ownsEngine = Binding.useOwnership()
-      const { surface } = received
+      observations.received = Binding.useWhichApplet(props)
+      observations.ownsEngine = Binding.useOwnership()
+      const { surface } = observations.received
       return surface ? <output>{surface.surfaceId}</output> : null
     }
     Note.meta = { applicationName: 'note' }
@@ -103,14 +101,14 @@ describe('independent Applet composition', () => {
     if (engine) engines.push(engine)
     const application = engine?.runtime.createApplicationInstance({ applicationName: 'notebook/note' })
     const view = render(<Binding engine={engine}><Note application={application} /></Binding>)
-    const runtime = received.engine
+    const runtime = observations.received.engine
     if (injected) {
       expect(runtime).toBe(engine)
-      expect(received.application).toBe(application)
+      expect(observations.received.application).toBe(application)
     }
-    expect(ownsEngine).toBe(!injected)
-    expect(received.surface.applicationId).toBe(received.application.applicationId)
-    expect(view.getByRole('status').textContent).toBe(received.surface.surfaceId)
+    expect(observations.ownsEngine).toBe(!injected)
+    expect(observations.received.surface.applicationId).toBe(observations.received.application.applicationId)
+    expect(view.getByRole('status').textContent).toBe(observations.received.surface.surfaceId)
     view.unmount()
     await act(async () => {})
     expect(tracking.destroy).toHaveBeenCalledTimes(injected ? 0 : 1)
@@ -118,15 +116,14 @@ describe('independent Applet composition', () => {
 
   it('resets a directly owned runtime once and replaces its descendants even when record IDs repeat', async () => {
     const tracking = trackedEnvironment()
-    let occurrence
-    let releaseReset
-    let sequence = 0
-    const beforeResetRootApplet = vi.fn(() => new Promise((resolve) => { releaseReset = resolve }))
+    const observations = { sequence: 0 }
+
+    const beforeResetRootApplet = vi.fn(() => new Promise((resolve) => { observations.releaseReset = resolve }))
     const observeEngine = vi.fn()
-    const createId = (kind) => `${kind}:${sequence++}`
+    const createId = (kind) => `${kind}:${observations.sequence++}`
     const options = { beforeResetRootApplet, createId }
     function Note(props) {
-      occurrence = Binding.useWhichApplet(props)
+      observations.occurrence = Binding.useWhichApplet(props)
       return <Draft />
     }
     Note.meta = { applicationName: 'note' }
@@ -142,24 +139,24 @@ describe('independent Applet composition', () => {
       }} />
     }
     const view = render(<Binding options={options}><Note /></Binding>)
-    const previousEngine = occurrence.engine
+    const previousEngine = observations.occurrence.engine
     fireEvent.change(view.getByRole('textbox'), { target: { value: 'edited' } })
     view.rerender(<Binding options={options} onEngine={observeEngine}><Note /></Binding>)
     expect(observeEngine).toHaveBeenCalledExactlyOnceWith(previousEngine)
     view.rerender(<Binding options={options}><Note /></Binding>)
     expect(view.getByRole('textbox').value).toBe('edited')
     expect(view.getByRole('textbox').dataset.local).toBe('edited')
-    const first = previousEngine.checkpoint.reset()
-    const second = previousEngine.checkpoint.reset()
+    const first = previousEngine.reset()
+    const second = previousEngine.reset()
     expect(first).toBe(second)
     expect(beforeResetRootApplet).toHaveBeenCalledOnce()
-    await act(async () => { sequence = 0; releaseReset(); await first })
-    expect(occurrence.engine).not.toBe(previousEngine)
+    await act(async () => { observations.sequence = 0; observations.releaseReset(); await first })
+    expect(observations.occurrence.engine).not.toBe(previousEngine)
     expect(view.getByRole('textbox').value).toBe('draft')
     expect(view.getByRole('textbox').dataset.local).toBe('initial')
-    expect(occurrence.engine.rootSurfaceId).toBe(previousEngine.rootSurfaceId)
+    expect(observations.occurrence.engine.rootSurfaceId).toBe(previousEngine.rootSurfaceId)
     expect(tracking.destroy).toHaveBeenCalledOnce()
-    expect(await previousEngine.checkpoint.reset()).toBe(false)
+    expect(await previousEngine.reset()).toBe(false)
   })
 
   it('supplies independent resident admission and retains residents with ordinary members', () => {
@@ -180,7 +177,7 @@ describe('independent Applet composition', () => {
       .toHaveLength(2)
     expect(engine.compositor.surface.read({ surfaceId: resident.surfaceId })).toBeDefined()
     engine.runtime.selectChild({ surfaceId: deck.surfaceId, childSurfaceId: added.surfaceId })
-    const snapshot = engine.checkpoint.getSnapshot()
+    const snapshot = engine.getState()
     const restored = AppletEngine.create({ applet, desktopEnvironment: environment, options: { initialState: snapshot } })
     engines.push(restored)
     expect(restored.compositor.surface.read({ surfaceId: deck.surfaceId }))
@@ -192,27 +189,26 @@ describe('independent Applet composition', () => {
     const applet = tree()
     const tracking = trackedEnvironment()
     applet.desktopEnvironment = tracking.environment
-    let engine
-    let setExposed
-    let visualMounts = 0
+    const observations = { visualMounts: 0 }
+
     function Visual() {
       const [value, setValue] = AppletEngine.useState('draft', 'value')
-      useEffect(() => { visualMounts += 1; return () => { visualMounts -= 1 } }, [])
+      useEffect(() => { observations.visualMounts += 1; return () => { observations.visualMounts -= 1 } }, [])
       return <input aria-label="visual draft" value={value} onChange={(event) => setValue(event.target.value)} />
     }
     function RetainedOwner() {
       const [exposed, changeExposed] = useState(true)
-      setExposed = changeExposed
+      observations.setExposed = changeExposed
       return exposed ? <Visual /> : null
     }
     const Binding = createAppletEngine(applet)
-    const mounted = render(<Binding onEngine={(value) => { engine = value }}><RetainedOwner /></Binding>)
-    const identity = engine.rootApplicationId
+    const mounted = render(<Binding onEngine={(value) => { observations.engine = value }}><RetainedOwner /></Binding>)
+    const identity = observations.engine.rootApplicationId
     fireEvent.change(mounted.getByRole('textbox', { name: 'visual draft' }), { target: { value: 'retained' } })
-    act(() => setExposed(false))
-    expect(visualMounts).toBe(0)
-    expect(engine.rootApplicationId).toBe(identity)
-    act(() => setExposed(true))
+    act(() => observations.setExposed(false))
+    expect(observations.visualMounts).toBe(0)
+    expect(observations.engine.rootApplicationId).toBe(identity)
+    act(() => observations.setExposed(true))
     expect(mounted.getByRole('textbox', { name: 'visual draft' }).value).toBe('retained')
     const destroy = tracking.destroy
     mounted.unmount()
@@ -237,11 +233,10 @@ describe('independent Applet composition', () => {
     const Outer = createAppletEngine(outerApplet)
     const injected = Inner.create({ applet: innerApplet, desktopEnvironment: innerTracking.environment })
     engines.push(injected)
-    let outer
-    let observed
+    const observations = {}
     function Probe() {
       const [draft] = Inner.useState('inner draft', 'draft')
-      observed = {
+      observations.observed = {
         application: Inner.useApplication(),
         engine: Inner.use(),
         optionalEngine: Inner.useOptional(),
@@ -250,15 +245,15 @@ describe('independent Applet composition', () => {
       }
       return <output data-inner-draft="">{draft}</output>
     }
-    const view = render(<Outer onEngine={(value) => { outer = value }}>
+    const view = render(<Outer onEngine={(value) => { observations.outer = value }}>
       <Inner engine={injected}><Probe /></Inner>
     </Outer>)
-    expect(observed.engine).toBe(injected)
-    expect(observed.optionalEngine).toBe(injected)
-    expect(observed.application.applicationId).toBe(injected.rootApplicationId)
-    expect(observed.ownership).toBe(false)
+    expect(observations.observed.engine).toBe(injected)
+    expect(observations.observed.optionalEngine).toBe(injected)
+    expect(observations.observed.application.applicationId).toBe(injected.rootApplicationId)
+    expect(observations.observed.ownership).toBe(false)
     expect(injected.appletState.read({ applicationId: injected.rootApplicationId, stateName: 'draft' })).toBe('inner draft')
-    expect(outer.appletState.read({ applicationId: outer.rootApplicationId, stateName: 'draft' })).toBeUndefined()
+    expect(observations.outer.appletState.read({ applicationId: observations.outer.rootApplicationId, stateName: 'draft' })).toBeUndefined()
     view.unmount()
     await act(async () => {})
     expect(outerTracking.destroy).toHaveBeenCalledOnce()
@@ -271,14 +266,14 @@ describe('independent Applet composition', () => {
     const engine = Binding.create({ applet, desktopEnvironment: environment })
     engines.push(engine)
     const child = engine.runtime.childApplication(engine.compositor.application.read({ applicationId: engine.rootApplicationId }), 'note')
-    let observed
-    function Probe() { observed = Binding.useApplication(); return null }
+    const observations = {}
+    function Probe() { observations.observed = Binding.useApplication(); return null }
     const view = render(<Binding engine={engine}>
       <Binding.Application application={child}>
         <Binding engine={engine}><Probe /></Binding>
       </Binding.Application>
     </Binding>)
-    expect(observed).toBe(child)
+    expect(observations.observed).toBe(child)
     view.unmount()
   })
 
@@ -286,6 +281,5 @@ describe('independent Applet composition', () => {
     expect(() => AppletEngine.create({ applet: tree({ addable: 'yes' }), desktopEnvironment: environment }))
       .toThrow('addable must be a boolean')
   })
-
 
 })

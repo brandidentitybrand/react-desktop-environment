@@ -9,7 +9,6 @@ import {
   createAppletStateStore,
   immutableJson,
   useAppletState,
-  validateSurfaceState,
 } from './AppletState.js'
 
 const application = Object.freeze({
@@ -49,72 +48,29 @@ describe('Surface state', () => {
     expect(() => immutableJson({ value: Number.NaN })).toThrow(/JSON numbers/)
   })
 
-  it('keeps recognized Surface entries and discards unusable entries', () => {
-    const registry = {
-      'root/notes': {},
-    }
-    const surfaceState = validateSurfaceState([
-      {
-        surfaceId: 'surface:notes',
-        application: {
-          applicationId: application.applicationId,
-          applicationName: application.applicationName,
-          permanent: true,
-        },
-        appletState: { open: true, obsolete: 'ignored until registered' },
-        selectedChildSurfaceId: 'surface:missing',
-        window: { parentWindowId: null, windowId: 'window:notes' },
-      },
-      {
-        surfaceId: 'surface:obsolete',
-        application: {
-          applicationId: 'application:obsolete',
-          applicationName: 'obsolete',
-        },
-        window: { parentWindowId: null, windowId: 'window:obsolete' },
-      },
-    ], { applicationRegistry: registry })
-
-    expect(surfaceState).toHaveLength(1)
-    expect(surfaceState[0].selectedChildSurfaceId).toBeNull()
-    expect(surfaceState[0].application).toEqual({
-      applicationId: application.applicationId,
-      applicationName: application.applicationName,
-      permanent: true,
-    })
-  })
 })
 
 describe('Applet state', () => {
   const applicationId = application.applicationId
   const supply = { applicationId }
-  const withCleanState = (live = {}, clean = {}) => {
-    let cleanState = clean
-    const store = createAppletStateStore({
-      applications: { notes: application },
-      initialState: { [applicationId]: live },
-      getCleanState: () => cleanState,
-      onCleanStateChange: ({ state }) => { cleanState = state },
-    })
-    return { store, clean: () => cleanState }
-  }
+  const withState = (live = {}) => createAppletStateStore({
+    applications: { notes: application }, initialState: { [applicationId]: live },
+  })
 
   it('adopts live and global candidates independently and retains later declarations', () => {
-    const { store, clean } = withCleanState(
+    const store = withState(
       { open: true, title: 'recovered edit', obsolete: 'old' },
       { open: false, title: 'saved title', obsolete: 'old' },
     )
     store.ensure({ applicationId, stateName: 'open', initialValue: false })
-    expect(clean()).toEqual({ open: false })
     store.ensure({ applicationId, stateName: 'title', initialValue: 'untitled' })
     expect(store.snapshot(applicationId)).toEqual({
-      open: true, title: 'recovered edit',
+      open: true, title: 'recovered edit', obsolete: 'old',
     })
-    expect(clean()).toEqual({ open: false, title: 'saved title' })
   })
 
   it('adopts each recognized saved value and supplies a rejected candidate', () => {
-    const { store, clean } = withCleanState(
+    const store = withState(
       { columns: ['name'] },
       { columns: ['removed'] },
     )
@@ -124,11 +80,10 @@ describe('Applet state', () => {
       applicationId, stateName: 'columns', initialValue: [], adopt,
     })
     expect(store.snapshot(applicationId)).toEqual({ columns: ['name'] })
-    expect(clean()).toEqual({ columns: [] })
   })
 
   it('resolves one default for independently missing or rejected values', () => {
-    const { store, clean } = withCleanState({ request: 'obsolete' })
+    const store = withState({ request: 'obsolete' })
     const initialValue = vi.fn(() => ({ requestId: crypto.randomUUID() }))
     const value = store.ensure({
       applicationId,
@@ -137,12 +92,11 @@ describe('Applet state', () => {
       adopt: (candidate) => typeof candidate === 'object' ? candidate : undefined,
     })
     expect(initialValue).toHaveBeenCalledOnce()
-    expect(clean()).toEqual({ request: value })
-    expect(Object.isFrozen(value)).toBe(true)
+    expect(value).toBe(initialValue.mock.results[0].value)
   })
 
   it('reapplies recognition to both values when the owner catalogue changes', () => {
-    const { store, clean } = withCleanState(
+    const store = withState(
       { columns: [] },
       { columns: ['removed'] },
     )
@@ -159,18 +113,16 @@ describe('Applet state', () => {
       adopt: (value) => value.every((key) => key === 'current') ? value : undefined,
     })
     expect(store.snapshot(applicationId)).toEqual({ columns: [] })
-    expect(clean()).toEqual({ columns: ['current'] })
   })
 
   it('keeps lifetime supply local to its target and operation', () => {
-    const { store, clean } = withCleanState()
+    const store = withState()
     store.ensure({ applicationId, stateName: 'document', initialValue: null })
     store.ensure({ applicationId, stateName: 'open', initialValue: false })
     const setDocument = store.getSetter({ applicationId, stateName: 'document' })
     const setOpen = store.getSetter({ applicationId, stateName: 'open' })
     setOpen(true)
     setDocument('supplied document', { supply })
-    expect(clean()).toEqual({ document: 'supplied document', open: false })
     expect(store.snapshot(applicationId)).toEqual({
       document: 'supplied document', open: true,
     })
@@ -178,39 +130,23 @@ describe('Applet state', () => {
     setDocument('late default result', { supply })
     expect(store.read({ applicationId, stateName: 'document' }))
       .toBe('ordinary document')
-    expect(clean()).toEqual({ document: 'supplied document', open: false })
-  })
-
-  it('publishes an eligible supply after both values have changed', () => {
-    const observed = []
-    const store = createAppletStateStore({
-      applications: { notes: application },
-      onCleanStateChange({ state }) {
-        observed.push([store.snapshot(applicationId), state])
-      },
-    })
-    store.ensure({ applicationId, stateName: 'open', initialValue: false })
-    store.write({ applicationId, stateName: 'open', value: true, supply })
-    expect(observed.at(-1)).toEqual([{ open: true }, { open: true }])
   })
 
   it('ends supply eligibility when an ordinary invocation writes the same value', () => {
-    const { store, clean } = withCleanState()
+    const store = withState()
     store.ensure({ applicationId, stateName: 'open', initialValue: false })
     const setOpen = store.getSetter({ applicationId, stateName: 'open' })
     setOpen(false)
     setOpen(true, { supply })
     expect(store.snapshot(applicationId)).toEqual({ open: false })
-    expect(clean()).toEqual({ open: false })
   })
 
   it('allows only the same supplier to replace its current default', () => {
-    const { store, clean } = withCleanState()
+    const store = withState()
     store.write({ applicationId, stateName: 'size', value: 10, supply: { surfaceId: 'owner' } })
     store.write({ applicationId, stateName: 'size', value: 20, supply: { surfaceId: 'other' } })
     expect(store.snapshot(applicationId)).toEqual({ size: 10 })
     store.write({ applicationId, stateName: 'size', value: 30, supply: { surfaceId: 'owner' } })
-    expect(clean()).toEqual({ size: 30 })
     expect(() => store.write({
       applicationId,
       stateName: 'size',
@@ -220,52 +156,22 @@ describe('Applet state', () => {
   })
 
   it('retains a recipe starting value as that occurrence owner supplied state', () => {
-    const cleanState = vi.fn()
-    const store = createAppletStateStore({ onCleanStateChange: cleanState })
+    const store = createAppletStateStore()
     store.addApplication(application, { savedState: { document: 'recipe' }, supply })
     store.ensure({ applicationId, stateName: 'document', initialValue: null })
     expect(store.snapshot(applicationId)).toEqual({ document: 'recipe' })
-    expect(store.cleanSnapshot(applicationId)).toEqual({ document: 'recipe' })
     store.write({ applicationId, stateName: 'document', value: 'completed', supply })
     expect(store.snapshot(applicationId)).toEqual({ document: 'completed' })
-    expect(cleanState).toHaveBeenLastCalledWith({
-      applicationId, state: { document: 'completed' },
-    })
-  })
-
-  it('uses the exact submitted clean values after save and continues supplying', () => {
-    const { store, clean } = withCleanState()
-    store.ensure({ applicationId, stateName: 'document', initialValue: null })
-    const submitted = store.snapshot(applicationId)
-    store.write({ applicationId, stateName: 'document', value: 'first', supply })
-    store.replaceCleanState({ [applicationId]: submitted })
-    expect(store.cleanSnapshot(applicationId)).toEqual({ document: null })
-    store.ensure({ applicationId, stateName: 'document', initialValue: null })
-    expect(store.cleanSnapshot(applicationId)).toEqual({ document: null })
-    store.write({ applicationId, stateName: 'document', value: 'second', supply })
-    expect(clean()).toEqual({ document: 'second' })
-  })
-
-  it('does not resupply a name on rerender after saving an earlier capture', () => {
-    const { store } = withCleanState()
-    const submitted = store.snapshot(applicationId)
-    const initialValue = vi.fn(() => ({ requestId: crypto.randomUUID() }))
-    store.ensure({ applicationId, stateName: 'request', initialValue })
-    store.replaceCleanState({ [applicationId]: submitted })
-    store.ensure({ applicationId, stateName: 'request', initialValue })
-    expect(store.cleanSnapshot(applicationId)).toEqual({})
-    expect(initialValue).toHaveBeenCalledOnce()
   })
 
   it('ends saved candidates, supplied values, and setters with their occurrence', () => {
-    const { store, clean } = withCleanState({ open: true }, { open: true })
+    const store = withState({ open: true }, { open: true })
     store.ensure({ applicationId, stateName: 'open', initialValue: false })
     const oldSetter = store.getSetter({ applicationId, stateName: 'open' })
     store.endApplicationState({ applicationId })
     store.ensure({ applicationId, stateName: 'open', initialValue: false })
     oldSetter(true)
     expect(store.snapshot(applicationId)).toEqual({ open: false })
-    expect(clean()).toEqual({ open: false })
     store.removeApplication({ applicationId })
     expect(() => oldSetter(true)).not.toThrow()
     store.addApplication(application)
@@ -273,32 +179,31 @@ describe('Applet state', () => {
     expect(store.snapshot(applicationId)).toEqual({ open: 'fresh' })
   })
 
-  it('keeps nonpersistent live values and supply out of the clean checkpoint', () => {
-    const { store, clean } = withCleanState()
+  it('keeps nonpersistent live values and supply out of durable state', () => {
+    const store = withState()
     const initialValue = () => ({ callback() {} })
     store.ensure({ applicationId, stateName: 'menu', initialValue, persistent: false })
     store.getSetter({ applicationId, stateName: 'menu' })(true, { supply })
     expect(store.read({ applicationId, stateName: 'menu' })).toBe(true)
     expect(store.snapshot(applicationId)).toEqual({})
-    expect(clean()).toEqual({})
   })
 
   it('adapts recognition and ordinary setters through a standalone hook', () => {
-    let setter
+    const observations = {}
     function Columns({ adopt, initialValue }) {
       const [columns, setColumns] = useAppletState(initialValue, 'columns', { adopt })
-      setter = setColumns
+      observations.setter = setColumns
       return <span>{columns.join(',')}</span>
     }
     const view = render(<Columns initialValue={['old']} adopt={(value) => value} />)
-    act(() => setter(['old', 'other'], { supply }))
+    act(() => observations.setter(['old', 'other'], { supply }))
     expect(view.container.textContent).toBe('old,other')
     view.rerender(<Columns
       initialValue={['new']}
       adopt={(value) => value.every((key) => key === 'new') ? value : undefined}
     />)
     expect(view.container.textContent).toBe('new')
-    act(() => setter([]))
+    act(() => observations.setter([]))
     expect(view.container.textContent).toBe('')
   })
 
@@ -313,16 +218,13 @@ describe('Applet state', () => {
       applicationId, stateName: 'menu', initialValue: true, persistent: false,
     })
     const listener = vi.fn()
-    const checkpoint = vi.fn()
     store.subscribe({ applicationId, stateName: 'open' }, listener)
-    store.subscribeCheckpoint(checkpoint)
 
     store.endApplicationState({ applicationId })
 
-    expect(store.snapshot(applicationId)).toEqual({})
+    expect(store.snapshot(applicationId)).toBeUndefined()
     expect(store.read({ applicationId, stateName: 'menu' })).toBeUndefined()
     expect(listener).toHaveBeenCalledOnce()
-    expect(checkpoint).toHaveBeenCalledOnce()
     expect(store.ensure({ applicationId, stateName: 'open', initialValue: false }))
       .toBe(false)
     expect(store.ensure({ applicationId, stateName: 'unseen', initialValue: 'new' }))
@@ -337,12 +239,11 @@ describe('Applet state', () => {
       applications: { notes: application },
       initialState: {
         [application.applicationId]: {
-          obsolete: 'not captured',
+          obsolete: 'undeclared',
           open: true,
         },
       },
     })
-    store.subscribeCheckpoint(listener)
 
     expect(store.ensure({
       applicationId: application.applicationId,
@@ -355,13 +256,13 @@ describe('Applet state', () => {
       stateName: 'missing',
     })).toBe('current default')
     expect(store.snapshot(application.applicationId)).toEqual({
+      obsolete: 'undeclared',
       missing: 'current default',
       open: true,
     })
-    expect(listener).toHaveBeenCalled()
   })
 
-  it('keeps nonpersistent state out of the Surface checkpoint segment', () => {
+  it('keeps nonpersistent state out of durable state', () => {
     const store = createAppletStateStore({ applications: { notes: application } })
     store.ensure({
       applicationId: application.applicationId,
@@ -373,7 +274,7 @@ describe('Applet state', () => {
       applicationId: application.applicationId,
       stateName: 'hovered',
     })).toBe(false)
-    expect(store.snapshot(application.applicationId)).toEqual({})
+    expect(store.snapshot(application.applicationId)).toBeUndefined()
   })
 
   it('subscribes a hook to its Application segment', () => {
@@ -472,8 +373,7 @@ describe.each(['standalone', 'runtime'])('%s owner recognition', (adapter) => {
   }
 
   it.each(['original', 'copy'])('retains inline %s recognition through edits and catalogue changes', (result) => {
-    let setColumns
-    let currentColumns
+    const observations = {}
     function Columns({ catalogue, recognize = true }) {
       const [columns, setValue] = useAppletState(['name'], 'columns', {
         adopt: recognize ? (value) => (
@@ -482,56 +382,55 @@ describe.each(['standalone', 'runtime'])('%s owner recognition', (adapter) => {
             : undefined
         ) : undefined,
       })
-      setColumns = setValue
-      currentColumns = columns
+      observations.setColumns = setValue
+      observations.currentColumns = columns
       return <span>{columns.join(',')}</span>
     }
     const view = renderConsumer(<Columns catalogue={['name', 'code']} />)
-    const initialColumns = currentColumns
+    const initialColumns = observations.currentColumns
     view.rerender(<Columns catalogue={['name', 'code']} />)
-    expect(currentColumns).toBe(initialColumns)
+    expect(observations.currentColumns).toBe(initialColumns)
 
-    act(() => setColumns(['code']))
+    act(() => observations.setColumns(['code']))
     expect(view.container.textContent).toBe('code')
-    act(() => setColumns((current) => [...current, 'name']))
+    act(() => observations.setColumns((current) => [...current, 'name']))
     expect(view.container.textContent).toBe('code,name')
     view.rerender(<Columns catalogue={['name', 'code', 'other']} />)
     expect(view.container.textContent).toBe('code,name')
 
     view.rerender(<Columns catalogue={['name', 'other']} />)
     expect(view.container.textContent).toBe('name')
-    act(() => setColumns((current) => [...current, 'other']))
+    act(() => observations.setColumns((current) => [...current, 'other']))
     expect(view.container.textContent).toBe('name,other')
     view.rerender(<Columns catalogue={[]} recognize={false} />)
     expect(view.container.textContent).toBe('name,other')
-    act(() => setColumns(['unlisted']))
+    act(() => observations.setColumns(['unlisted']))
     expect(view.container.textContent).toBe('unlisted')
   })
 
   it('recognizes equivalent inline objects without replacing their current value', () => {
-    let setChoice
-    let currentChoice
+    const observations = {}
     function Choice() {
       const [choice, setValue] = useAppletState({ order: ['name'], open: false }, 'choice', {
         adopt: (value) => ({ open: value.open, order: [...value.order] }),
       })
-      setChoice = setValue
-      currentChoice = choice
+      observations.setChoice = setValue
+      observations.currentChoice = choice
       return <span>{JSON.stringify(choice)}</span>
     }
     const view = renderConsumer(<Choice />)
-    const initialChoice = currentChoice
+    const initialChoice = observations.currentChoice
     view.rerender(<Choice />)
-    expect(currentChoice).toBe(initialChoice)
-    act(() => setChoice((current) => ({ ...current, open: true })))
-    expect(currentChoice).toEqual({ order: ['name'], open: true })
+    expect(observations.currentChoice).toBe(initialChoice)
+    act(() => observations.setChoice((current) => ({ ...current, open: true })))
+    expect(observations.currentChoice).toEqual({ order: ['name'], open: true })
   })
 
   it('retains a stable replacement adopter without reinterpreting ordinary writes', () => {
-    let setColumns
+    const observations = {}
     function Columns({ adopt }) {
       const [columns, setValue] = useAppletState(['name'], 'columns', { adopt })
-      setColumns = setValue
+      observations.setColumns = setValue
       return <span>{columns.join(',')}</span>
     }
     const original = (value) => value
@@ -539,7 +438,7 @@ describe.each(['standalone', 'runtime'])('%s owner recognition', (adapter) => {
     const view = renderConsumer(<Columns adopt={original} />)
     view.rerender(<Columns adopt={replacement} />)
     expect(view.container.textContent).toBe('name')
-    act(() => setColumns(['code']))
+    act(() => observations.setColumns(['code']))
     expect(view.container.textContent).toBe('code')
     view.rerender(<Columns />)
     expect(view.container.textContent).toBe('code')
@@ -548,38 +447,36 @@ describe.each(['standalone', 'runtime'])('%s owner recognition', (adapter) => {
   it('keeps identity-preserving live recognition outside persistent JSON', () => {
     const first = { callback() {}, stream: new Map([['name', true]]) }
     const next = { callback() {}, stream: new Map([['code', true]]) }
-    let setLive
-    let currentLive
+    const observations = {}
     function Live() {
       const [live, setValue] = useAppletState(first, 'live', {
         adopt: (value) => value,
         persistent: false,
       })
-      setLive = setValue
-      currentLive = live
+      observations.setLive = setValue
+      observations.currentLive = live
       return <span>{[...live.stream.keys()].join(',')}</span>
     }
     const view = renderConsumer(<Live />)
     view.rerender(<Live />)
-    expect(currentLive).toBe(first)
-    act(() => setLive(next))
-    expect(currentLive).toBe(next)
+    expect(observations.currentLive).toBe(first)
+    act(() => observations.setLive(next))
+    expect(observations.currentLive).toBe(next)
     expect(view.container.textContent).toBe('code')
-    act(() => setLive((current) => current))
-    expect(currentLive).toBe(next)
+    act(() => observations.setLive((current) => current))
+    expect(observations.currentLive).toBe(next)
   })
 
   it('applies stable live-value recognizers again after ordinary writes and callback returns', () => {
     const initial = { name: 'current', callback() {} }
-    let setLive
-    let currentLive
+    const observations = {}
     function Live({ adopt }) {
       const [live, setValue] = useAppletState(initial, 'live', {
         adopt,
         persistent: false,
       })
-      setLive = setValue
-      currentLive = live
+      observations.setLive = setValue
+      observations.currentLive = live
       return <span>{live.name}</span>
     }
     const original = (value) => ({ ...value, name: value.name.toUpperCase() })
@@ -587,28 +484,28 @@ describe.each(['standalone', 'runtime'])('%s owner recognition', (adapter) => {
     const view = renderConsumer(<Live adopt={original} />)
 
     view.rerender(<Live adopt={replacement} />)
-    expect(currentLive).toEqual(initial)
-    expect(currentLive).not.toBe(initial)
-    expect(currentLive.callback).toBe(initial.callback)
+    expect(observations.currentLive).toEqual(initial)
+    expect(observations.currentLive).not.toBe(initial)
+    expect(observations.currentLive.callback).toBe(initial.callback)
 
-    act(() => setLive((current) => ({ ...current, name: 'edited' })))
+    act(() => observations.setLive((current) => ({ ...current, name: 'edited' })))
     expect(view.container.textContent).toBe('edited')
     view.rerender(<Live adopt={original} />)
     expect(view.container.textContent).toBe('EDITED')
-    expect(currentLive.callback).toBe(initial.callback)
+    expect(observations.currentLive.callback).toBe(initial.callback)
 
     view.rerender(<Live adopt={replacement} />)
-    act(() => setLive({ name: 'another', callback: initial.callback }))
+    act(() => observations.setLive({ name: 'another', callback: initial.callback }))
     view.rerender(<Live adopt={original} />)
     expect(view.container.textContent).toBe('ANOTHER')
-    expect(currentLive.callback).toBe(initial.callback)
+    expect(observations.currentLive.callback).toBe(initial.callback)
 
-    const retained = currentLive
+    const retained = observations.currentLive
     const identity = (value) => value
     view.rerender(<Live adopt={identity} />)
-    expect(currentLive).toBe(retained)
+    expect(observations.currentLive).toBe(retained)
     view.rerender(<Live adopt={original} />)
-    expect(currentLive).toEqual(retained)
-    expect(currentLive).not.toBe(retained)
+    expect(observations.currentLive).toEqual(retained)
+    expect(observations.currentLive).not.toBe(retained)
   })
 })

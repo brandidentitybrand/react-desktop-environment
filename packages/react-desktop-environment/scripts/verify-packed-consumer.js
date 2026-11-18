@@ -18,7 +18,6 @@ await writeFile(path.join(consumer, 'package.json'), JSON.stringify({
     react: '^19.2.8',
     'react-dom': '^19.2.8',
     jsdom: '^30.0.1',
-    'fake-indexeddb': '^6.2.4',
   },
 }, null, 2))
 execFileSync('npm', ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund'], {

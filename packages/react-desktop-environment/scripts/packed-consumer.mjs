@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { JSDOM } from 'jsdom'
-import { IDBFactory } from 'fake-indexeddb'
 import * as desktop from 'react-desktop-environment'
 import * as compositor from 'react-desktop-environment/compositor'
 import * as windowManager from 'react-desktop-environment/window-manager'
@@ -17,8 +16,6 @@ import {
   createAppletEngine,
   createAppletStateStore,
 } from 'react-desktop-environment/applet-engine'
-import { createAppletPersistence, resolveInitialAppletCheckpoint } from 'react-desktop-environment/applet-persistence'
-import { createIndexedDbAppletStore } from 'react-desktop-environment/applet-persistence/indexed-db'
 
 const installed = fileURLToPath(import.meta.resolve('react-desktop-environment/applet-engine'))
 assert.match(installed, /node_modules\/react-desktop-environment\/dist\/applet-engine\.js$/)
@@ -32,15 +29,13 @@ globalThis.document = dom.window.document
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 const environment = { compositor, windowManager, ui: { Window: ({ children }) => children } }
 const h = React.createElement
-let currentEngine
-let edit
-let noteApplication
-let observedTheme
+const observations = {}
+
 function Note({ application }) {
   const [value, setValue] = AppletEngine.useState('original', 'text')
-  noteApplication = application
-  edit = setValue
-  observedTheme = useAppletTheme()
+  observations.noteApplication = application
+  observations.edit = setValue
+  observations.observedTheme = useAppletTheme()
   return h('output', null, value)
 }
 Note.meta = Object.freeze({ applicationName: 'note' })
@@ -61,76 +56,61 @@ const BoundEngine = createAppletEngine(Notebook)
 assert.equal(BoundEngine.Runtime, AppletEngine)
 const root = createRoot(document.getElementById('root'))
 await act(async () => {
-  root.render(h(BoundEngine, { onEngine: (engine) => { currentEngine = engine } }, h(AppletPresentation, { scheme: 'day' })))
+  root.render(h(BoundEngine, { onEngine: (engine) => { observations.currentEngine = engine } }, h(AppletPresentation, { scheme: 'day' })))
 })
 assert.equal(document.querySelector('output').textContent, 'original')
-assert.equal(observedTheme.backgroundColor, 'navy')
-const originalEngine = currentEngine
-const originalApplicationId = noteApplication.applicationId
-const originalSurface = Object.values(currentEngine.compositor.getSnapshot().surfaces)
+assert.equal(observations.observedTheme.backgroundColor, 'navy')
+const originalEngine = observations.currentEngine
+const originalApplicationId = observations.noteApplication.applicationId
+const originalSurface = Object.values(observations.currentEngine.compositor.getSnapshot().surfaces)
   .find(({ applicationId }) => applicationId === originalApplicationId)
-assert.equal(observedTheme.canvasColor, 'white')
-assert.equal(resolveAppletTheme(observedTheme), observedTheme)
-const initialCheckpoint = currentEngine.checkpoint.getSnapshot()
-const initialDirty = currentEngine.checkpoint.isDirty()
+assert.equal(observations.observedTheme.canvasColor, 'white')
+assert.equal(resolveAppletTheme(observations.observedTheme), observations.observedTheme)
 await act(async () => {
-  root.render(h(BoundEngine, { onEngine: (engine) => { currentEngine = engine } }, h(AppletPresentation, { scheme: 'night' })))
+  root.render(h(BoundEngine, { onEngine: (engine) => { observations.currentEngine = engine } }, h(AppletPresentation, { scheme: 'night' })))
 })
-assert.equal(currentEngine, originalEngine)
-assert.equal(observedTheme.canvasColor, 'black')
-assert.equal(currentEngine.checkpoint.getSnapshot(), initialCheckpoint)
-assert.equal(currentEngine.checkpoint.isDirty(), initialDirty)
-const [deck] = currentEngine.compositor.surface.readChildren({ surfaceId: currentEngine.rootSurfaceId })
+assert.equal(observations.currentEngine, originalEngine)
+assert.equal(observations.observedTheme.canvasColor, 'black')
+const [deck] = observations.currentEngine.compositor.surface.readChildren({ surfaceId: observations.currentEngine.rootSurfaceId })
 assert.equal(deck.props.addable, true)
 const deckMenu = Array.from(document.querySelectorAll('button'))
   .find((button) => button.textContent === 'Deck menu')
 await act(async () => { deckMenu.click() })
-assert.equal(currentEngine.appletState.read({ applicationId: deck.applicationId, stateName: 'menuOpen' }), true)
+assert.equal(observations.currentEngine.appletState.read({ applicationId: deck.applicationId, stateName: 'menuOpen' }), true)
 assert.equal(deckMenu.getAttribute('aria-expanded'), 'true')
 await act(async () => { deckMenu.click() })
-assert.equal(currentEngine.appletState.read({ applicationId: deck.applicationId, stateName: 'menuOpen' }), false)
-await act(async () => { edit('retained') })
+assert.equal(observations.currentEngine.appletState.read({ applicationId: deck.applicationId, stateName: 'menuOpen' }), false)
+await act(async () => { observations.edit('retained') })
 await act(async () => {
-  currentEngine.compositor.surface.update({ surfaceId: originalSurface.surfaceId, hidden: true })
-  currentEngine.compositor.surface.update({ surfaceId: originalSurface.surfaceId, hidden: false })
+  observations.currentEngine.compositor.surface.update({ surfaceId: originalSurface.surfaceId, hidden: true })
+  observations.currentEngine.compositor.surface.update({ surfaceId: originalSurface.surfaceId, hidden: false })
 })
-assert.equal(noteApplication.applicationId, originalApplicationId)
+assert.equal(observations.noteApplication.applicationId, originalApplicationId)
 assert.equal(document.querySelector('output').textContent, 'retained')
-const saved = currentEngine.checkpoint.capture()
-assert.equal(saved.snapshot.find(({ surfaceId }) => surfaceId === originalSurface.surfaceId).appletState.text, 'retained')
-currentEngine.checkpoint.release(saved)
+const saved = observations.currentEngine.getState()
+assert.equal(saved.appletState[originalApplicationId].text, 'retained')
 await act(async () => { root.unmount() })
-const restored = AppletEngine.create({ applet: Notebook, desktopEnvironment: environment, options: { initialState: saved.snapshot } })
+const restored = AppletEngine.create({ applet: Notebook, desktopEnvironment: environment, options: { initialState: saved } })
 assert.equal(restored.rootSurfaceId, originalEngine.rootSurfaceId)
 assert.equal(restored.compositor.surface.read({ surfaceId: originalSurface.surfaceId }).applicationId, originalApplicationId)
 const restoredRoot = createRoot(document.getElementById('root'))
 await act(async () => { restoredRoot.render(h(BoundEngine, { engine: restored }, h(AppletPresentation))) })
 assert.equal(document.querySelector('output').textContent, 'retained')
-assert.equal(restored.checkpoint.isDirty(), false)
-const store = createIndexedDbAppletStore({ databaseName: 'independent-checkpoints', indexedDB: new IDBFactory() })
-await store.write({ scopeId: 'scope:one', checkpoint: saved.snapshot })
-const initial = await resolveInitialAppletCheckpoint({ scopeId: 'scope:one', localStore: store, globalCheckpoint: saved.snapshot })
-assert.equal(JSON.stringify(initial.checkpoint), JSON.stringify(saved.snapshot))
-const recovery = createAppletPersistence({ scopeId: 'scope:one', source: restored.checkpoint, store })
-assert.equal((await recovery.flush()).ok, true)
-assert.equal((await recovery.dispose({ flush: true })).ok, true)
+assert.equal(restored.getState(), saved)
 const columnState = { applicationId: originalApplicationId, stateName: 'columns' }
 restored.appletState.ensure({ ...columnState, initialValue: ['product'] })
-restored.checkpoint.getSnapshot()
 restored.appletState.ensure({
   ...columnState,
   initialValue: ['mixed'],
   adopt: (value) => value.every((column) => column === 'mixed') ? value : undefined,
   deferNotifications: true,
 })
-const adopted = restored.checkpoint.capture()
-assert.equal(JSON.stringify(adopted.snapshot.find(({ application }) => application.applicationId === originalApplicationId).appletState.columns), JSON.stringify(['mixed']))
-assert.equal(restored.checkpoint.isDirty(), false)
-restored.checkpoint.release(adopted)
+const adopted = restored.getState()
+assert.equal(JSON.stringify(adopted.appletState[originalApplicationId].columns), JSON.stringify(['mixed']))
 await act(async () => { restoredRoot.unmount() })
 restored.destroy()
 
-const selectionStore = createAppletStateStore({ applications: { note: noteApplication } })
+const selectionStore = createAppletStateStore({ applications: { note: observations.noteApplication } })
 function Selection({ catalogue }) {
   const [columns] = AppletEngine.useState(catalogue, 'selectedColumns', {
     adopt: (value) => value.every((column) => catalogue.includes(column)) ? value : undefined,
@@ -138,7 +118,7 @@ function Selection({ catalogue }) {
   return h('output', null, columns.join(','))
 }
 const selection = (catalogue) => h(AppletStateStoreContext.Provider, { value: selectionStore },
-  h(AppletEngine.Application, { application: noteApplication },
+  h(AppletEngine.Application, { application: observations.noteApplication },
     h(Selection, { catalogue, key: catalogue.join(',') }),
   ),
 )
@@ -150,11 +130,11 @@ try {
   await act(async () => { selectionRoot.render(selection(['product'])) })
   await act(async () => { selectionRoot.render(selection(['mixed'])) })
   assert.equal(document.querySelector('output').textContent, 'mixed')
-  assert.equal(JSON.stringify(selectionStore.snapshot(noteApplication.applicationId)), JSON.stringify({ selectedColumns: ['mixed'] }))
+  assert.equal(JSON.stringify(selectionStore.snapshot(observations.noteApplication.applicationId)), JSON.stringify({ selectedColumns: ['mixed'] }))
   assert.deepEqual(errors, [])
 } finally {
   await act(async () => { selectionRoot.unmount() })
   console.error = originalError
 }
 dom.window.close()
-console.log('Packed ESM entries, stock Applet UI, independent Applet tree, shared React/context, identity, state, replacement adoption, checkpoint restoration, live consumer scheme material, and explicit recovery passed.')
+console.log('Packed ESM entries, stock Applet UI, independent Applet tree, shared React/context, identity, state, replacement adoption, raw state restoration, live consumer scheme material passed.')

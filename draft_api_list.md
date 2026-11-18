@@ -7,7 +7,7 @@ their governing contracts; this list describes how consumers reach them.
 | Layer | Responsibility | When to use it |
 | --- | --- | --- |
 | Window manager and compositor | Window identity and parentage; Applications and Surface presentation records | Build custom behavior from the primitives |
-| AppletEngine | Standard Applet behavior, occurrence identity, state, Decks, themes, and checkpoints | Use Applet conventions with stock or custom presentation |
+| AppletEngine | Standard Applet behavior, occurrence identity, state, Decks, themes | Use Applet conventions with stock or custom presentation |
 | Stock UI | Frames, controls, DOM allocation, and pointer interaction | Start with an interactive wireframe, then replace its appearance |
 
 Workspace and Deck presentations are peer hosts. Consumers choose their
@@ -17,7 +17,7 @@ The layer called `surfaceStates` in discussion is currently exposed through
 the window-manager and compositor entries. There is no import named
 `surfaceStates`. Live Surface records are available through
 `compositor.getSnapshot().surfaces`; `surfaceState[]` is the AppletEngine
-checkpoint format.
+state format.
 
 ## Window manager and compositor
 
@@ -91,7 +91,7 @@ and the bound `create`, `add`, `move`, and `remove` operations.
 
 Import from `react-desktop-environment/applet-engine`.
 This layer owns registered definitions, occurrences, named state, stack
-selection, Deck behavior, themes, and checkpoints. See the
+selection, Deck behavior, themes. See the
 [Applet runtime contract](packages/react-desktop-environment/src/applet-engine/README.md).
 
 | API | Purpose |
@@ -137,8 +137,7 @@ Named state returns `[value, setValue]`; its options include `persistent` and
 The runtime constructor accepts `applet`, `desktopEnvironment`, `composition`,
 `options`, `rootApplet`, and `scheme`. The desktop environment supplies
 `windowManager.createWindowManager`, `compositor.createCompositor`, and
-optional `ui.Window` material. `options.initialState` supplies a checkpoint;
-`options.cleanState` supplies its independently tracked saved baseline.
+optional `ui.Window` material. `options.initialState` supplies the live state object.
 
 The React provider can receive an existing `engine`; its `onEngine` callback
 receives the active runtime. An injected runtime remains the injector's
@@ -156,8 +155,7 @@ runtime.
 | Same — presentation queries | `presentedSurface`, `isDeckSurface`, `surfacePlacementOwnerId` |
 | Same — transfer | `beginPeel`, `mergeDeck` |
 | Same — themes | `themeFor`, `getScheme`, `setScheme`, `subscribeTheme` |
-| `engine.checkpoint` | `getSnapshot`, `subscribe`, `capture`, `release`, `markClean`, `isDirty`, `matches`; `reset` when the runtime provides reset |
-| `engine` | `destroy` |
+| `engine` | `getState`, `destroy`, `reset` when supplied |
 
 Selection promotes a child to the top of its owner's stack. Removing the top
 reveals the next surviving child. The engine supplies that behavior to every
@@ -168,9 +166,6 @@ presentation through the same operations.
 rollback; UI owns pointer tracking and rendering. `mergeDeck(...)` transfers
 members into an admitting Deck and removes the emptied source anchor.
 
-Checkpoint capture returns an exact submitted snapshot. `markClean(capture)`
-marks that capture saved, and `release(capture)` releases it. Checkpoint state
-does not store live callbacks, requests, or UI resources.
 
 The engine also exposes `applicationRegistry`, `applicationInstances`,
 `surfaceComponentRegistry`, `compositor`, `windowManager`, `composition`,
@@ -184,7 +179,7 @@ The engine also exposes `applicationRegistry`, `applicationInstances`,
 | Deck | `Deck`, `useDeckComposition`, `resolveDeckProps` |
 | Child composition | `useChildSurfaceComposition` |
 | Presentation dimensions | `minimumPresentationSize`, `constrainPresentationSize` |
-| State construction/validation | `createAppletStateStore`, `immutableJson`, `validateSurfaceState` |
+| State construction/validation | `createAppletStateStore`, `immutableJson` |
 | State contexts | `AppletApplicationContext`, `AppletStateStoreContext` |
 | Theme construction | `createAppletTheme`, `resolveAppletTheme`, `DEFAULT_APPLET_THEME` |
 | Theme React bindings | `AppletThemeProvider`, `useAppletTheme`, `useAppletThemeRoot`, `AppletThemeContext`, `AppletThemeRootContext` |
@@ -201,8 +196,7 @@ model to the supplied `DeckSurface` material. Its `Surface`, `Bar`,
 
 Direct state-store consumers can use `engine.appletState`:
 `addApplication`, `removeApplication`, `endApplicationState`, `ensure`, `read`,
-`write`, `getSetter`, `snapshot`, `cleanSnapshot`, `replaceCleanState`,
-`subscribe`, and `subscribeCheckpoint`. Ordinary Applets declare state with
+`write`, `getSetter`, `snapshot`, `getSnapshot`, and `subscribe`. Ordinary Applets declare state with
 `AppletEngine.useState`.
 
 ## Stock UI
@@ -275,7 +269,3 @@ The entries also expose descriptive strings: `INFO` from window-manager;
 `ABSTRACTION`, `WHAT_IS_WORKSPACE`, `SCHEMA`, and `MAIN_API` from compositor;
 and `ABSTRACTION` from applet-engine and basic UI. These describe the API and
 are not runtime operations.
-
-Checkpoint storage has separate entries, outside the three interfaces covered
-here: [storage-neutral persistence](packages/react-desktop-environment/src/applet-persistence/README.md)
-and its [IndexedDB adapter](packages/react-desktop-environment/src/applet-persistence/indexed-db/README.md).

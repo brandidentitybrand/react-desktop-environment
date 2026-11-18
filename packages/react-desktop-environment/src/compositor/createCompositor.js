@@ -44,27 +44,26 @@ export default function createCompositor(options = {}) {
     throw new TypeError('configureSurfaceControls must be a function')
   }
 
-  let snapshot = EMPTY_SNAPSHOT
   const listeners = new Set()
   const childCache = new Map()
   const surfaceControlsCache = new Map()
 
   const notify = () => listeners.forEach((listener) => listener())
-  const commit = ({ applications = snapshot.applications, surfaces = snapshot.surfaces }) => {
-    snapshot = Object.freeze({
+  const commit = ({ applications = compositor.state.applications, surfaces = compositor.state.surfaces }) => {
+    compositor.state = Object.freeze({
       applications: Object.freeze(applications),
       surfaces: Object.freeze(surfaces),
     })
     notify()
-    return snapshot
+    return compositor.state
   }
   const requireApplication = (applicationId) => {
-    const record = snapshot.applications[applicationId]
+    const record = compositor.state.applications[applicationId]
     if (!record) throw new Error(`Unknown compositor application: ${applicationId}`)
     return record
   }
   const requireSurface = (surfaceId) => {
-    const record = snapshot.surfaces[surfaceId]
+    const record = compositor.state.surfaces[surfaceId]
     if (!record) throw new Error(`Unknown compositor surface: ${surfaceId}`)
     return record
   }
@@ -108,23 +107,17 @@ export default function createCompositor(options = {}) {
     childSurface?.window?.parentWindowId === parentSurface.windowId
   )
   const reconcileSurfaceSelections = (surfaces) => {
-    let reconciled = surfaces
-    for (const [surfaceId, parentSurface] of Object.entries(surfaces)) {
-      if (parentSurface.selectedChildSurfaceId == null) continue
-      const childSurface = surfaces[parentSurface.selectedChildSurfaceId]
-      if (isImmediateChildSurface(parentSurface, childSurface)) continue
-      if (reconciled === surfaces) reconciled = { ...surfaces }
-      reconciled[surfaceId] = Object.freeze({
-        ...parentSurface,
-        selectedChildSurfaceId: null,
-      })
-    }
-    return reconciled
+    const invalid = Object.values(surfaces).filter(parent => parent.selectedChildSurfaceId != null
+      && !isImmediateChildSurface(parent, surfaces[parent.selectedChildSurfaceId]))
+    if (!invalid.length) return surfaces
+    return { ...surfaces, ...Object.fromEntries(invalid.map(parent => [
+      parent.surfaceId, Object.freeze({ ...parent, selectedChildSurfaceId: null }),
+    ])) }
   }
   const nextZIndex = () =>
     Math.max(
       baseZIndex - 1,
-      ...Object.values(snapshot.surfaces).map(({ zIndex }) => zIndex),
+      ...Object.values(compositor.state.surfaces).map(({ zIndex }) => zIndex),
     ) + 1
 
   const application = Object.freeze({
@@ -136,7 +129,7 @@ export default function createCompositor(options = {}) {
     add({ application: record } = {}) {
       if (!record) throw new Error('application.add requires an application object')
       if (!record.applicationId) throw new Error('applicationId is required')
-      if (snapshot.applications[record.applicationId]) {
+      if (compositor.state.applications[record.applicationId]) {
         throw new Error(`Duplicate compositor application: ${record.applicationId}`)
       }
       requireApplicationComponent(record.applicationName)
@@ -146,26 +139,26 @@ export default function createCompositor(options = {}) {
         props: record.props ?? {},
       })
       commit({
-        applications: { ...snapshot.applications, [added.applicationId]: added },
+        applications: { ...compositor.state.applications, [added.applicationId]: added },
       })
       return added
     },
     read({ applicationId } = {}) {
-      return snapshot.applications[applicationId]
+      return compositor.state.applications[applicationId]
     },
     update({ applicationId, ...changes } = {}) {
       const current = requireApplication(applicationId)
       const applicationName = changes.applicationName ?? current.applicationName
       requireApplicationComponent(applicationName)
       const updated = Object.freeze({ ...current, ...changes, applicationName })
-      const surfaces = { ...snapshot.surfaces }
-      for (const [surfaceId, surface] of Object.entries(surfaces)) {
+      const surfaces = { ...compositor.state.surfaces }
+      Object.entries(surfaces).forEach(([surfaceId, surface]) => {
         if (surface.applicationId === applicationId) {
           surfaces[surfaceId] = Object.freeze({ ...surface, application: updated })
         }
-      }
+      })
       commit({
-        applications: { ...snapshot.applications, [applicationId]: updated },
+        applications: { ...compositor.state.applications, [applicationId]: updated },
         surfaces,
       })
       return updated
@@ -173,13 +166,13 @@ export default function createCompositor(options = {}) {
     remove({ applicationId } = {}) {
       requireApplication(applicationId)
       if (
-        Object.values(snapshot.surfaces).some(
+        Object.values(compositor.state.surfaces).some(
           (surface) => surface.applicationId === applicationId,
         )
       ) {
         throw new Error(`Cannot remove application ${applicationId} while surfaces reference it`)
       }
-      const applications = { ...snapshot.applications }
+      const applications = { ...compositor.state.applications }
       delete applications[applicationId]
       commit({ applications })
       return applicationId
@@ -226,7 +219,7 @@ export default function createCompositor(options = {}) {
     add({ surface: record } = {}) {
       if (!record) throw new Error('surface.add requires a surface object')
       validateSurfaceState(record)
-      if (snapshot.surfaces[record.surfaceId]) {
+      if (compositor.state.surfaces[record.surfaceId]) {
         throw new Error(`Duplicate compositor surface: ${record.surfaceId}`)
       }
       const window = requireWindow(record.windowId)
@@ -236,18 +229,18 @@ export default function createCompositor(options = {}) {
         throw new Error('surface.add requires current window and application references')
       }
       const added = Object.freeze({ ...record, window, application: linkedApplication })
-      commit({ surfaces: { ...snapshot.surfaces, [added.surfaceId]: added } })
+      commit({ surfaces: { ...compositor.state.surfaces, [added.surfaceId]: added } })
       return added
     },
     read({ surfaceId } = {}) {
-      return snapshot.surfaces[surfaceId]
+      return compositor.state.surfaces[surfaceId]
     },
     readChildren({ surfaceId } = {}) {
       const parentSurface = requireSurface(surfaceId)
       const managerSnapshot = windowManager.getSnapshot()
       const previous = childCache.get(surfaceId)
       if (
-        previous?.compositorSnapshot === snapshot &&
+        previous?.compositorSnapshot === compositor.state &&
         previous?.managerSnapshot === managerSnapshot
       ) {
         return previous.value
@@ -259,13 +252,13 @@ export default function createCompositor(options = {}) {
           .map((window) => window.windowId),
       )
       const next = Object.freeze(
-        Object.values(snapshot.surfaces).filter((candidate) =>
+        Object.values(compositor.state.surfaces).filter((candidate) =>
           childWindowIds.has(candidate.windowId),
         ),
       )
       const value = previous && sameRecords(previous.value, next) ? previous.value : next
       childCache.set(surfaceId, {
-        compositorSnapshot: snapshot,
+        compositorSnapshot: compositor.state,
         managerSnapshot,
         value,
       })
@@ -274,7 +267,7 @@ export default function createCompositor(options = {}) {
     readSelectedChild({ surfaceId } = {}) {
       const parentSurface = requireSurface(surfaceId)
       if (parentSurface.selectedChildSurfaceId == null) return undefined
-      const childSurface = snapshot.surfaces[parentSurface.selectedChildSurfaceId]
+      const childSurface = compositor.state.surfaces[parentSurface.selectedChildSurfaceId]
       return isImmediateChildSurface(parentSurface, childSurface)
         ? childSurface
         : undefined
@@ -313,7 +306,7 @@ export default function createCompositor(options = {}) {
       })
       commit({
         surfaces: {
-          ...snapshot.surfaces,
+          ...compositor.state.surfaces,
           [surfaceId]: selectedParent,
           [childSurfaceId]: activatedChild,
         },
@@ -340,7 +333,7 @@ export default function createCompositor(options = {}) {
       })
       commit({
         surfaces: {
-          ...snapshot.surfaces,
+          ...compositor.state.surfaces,
           [surfaceId]: selectedParent,
           [childSurfaceId]: raisedChild,
         },
@@ -368,7 +361,7 @@ export default function createCompositor(options = {}) {
         surfaceComponentName,
       })
       validateSurfaceState(updated)
-      commit({ surfaces: { ...snapshot.surfaces, [surfaceId]: updated } })
+      commit({ surfaces: { ...compositor.state.surfaces, [surfaceId]: updated } })
       return updated
     },
     raise({ surfaceId } = {}) {
@@ -377,7 +370,7 @@ export default function createCompositor(options = {}) {
         ...current,
         zIndex: nextZIndex(),
       })
-      commit({ surfaces: { ...snapshot.surfaces, [surfaceId]: updated } })
+      commit({ surfaces: { ...compositor.state.surfaces, [surfaceId]: updated } })
       return updated
     },
     readControls({ surfaceId } = {}) {
@@ -458,7 +451,7 @@ export default function createCompositor(options = {}) {
     },
     remove({ surfaceId } = {}) {
       requireSurface(surfaceId)
-      const surfaces = { ...snapshot.surfaces }
+      const surfaces = { ...compositor.state.surfaces }
       delete surfaces[surfaceId]
       surfaceControlsCache.delete(surfaceId)
       commit({ surfaces: reconcileSurfaceSelections(surfaces) })
@@ -470,46 +463,44 @@ export default function createCompositor(options = {}) {
   })
 
   const reconcileWindows = () => {
-    let changed = false
     const surfaces = {}
-    for (const [surfaceId, current] of Object.entries(snapshot.surfaces)) {
+    Object.entries(compositor.state.surfaces).forEach(([surfaceId, current]) => {
       const window = windowManager.window.read({ windowId: current.windowId })
       if (!window) {
-        changed = true
         surfaceControlsCache.delete(surfaceId)
-        continue
+        return
       }
       if (window !== current.window) {
-        changed = true
         surfaces[surfaceId] = Object.freeze({ ...current, window })
       } else {
         surfaces[surfaceId] = current
       }
-    }
-    if (changed) commit({ surfaces: reconcileSurfaceSelections(surfaces) })
+    })
+    if (Object.keys(surfaces).length !== Object.keys(compositor.state.surfaces).length
+      || Object.values(surfaces).some(surface => surface !== compositor.state.surfaces[surface.surfaceId])) commit({ surfaces: reconcileSurfaceSelections(surfaces) })
   }
   const unsubscribeWindowManager = windowManager.subscribe(reconcileWindows)
 
   const cleanup = () => {
     const removedSurfaceIds = []
     const surfaces = {}
-    for (const [surfaceId, record] of Object.entries(snapshot.surfaces)) {
+    Object.entries(compositor.state.surfaces).forEach(([surfaceId, record]) => {
       if (
         !windowManager.window.read({ windowId: record.windowId }) ||
-        !snapshot.applications[record.applicationId]
+        !compositor.state.applications[record.applicationId]
       ) {
         removedSurfaceIds.push(surfaceId)
         surfaceControlsCache.delete(surfaceId)
       } else {
         surfaces[surfaceId] = record
       }
-    }
+    })
     const referencedApplicationIds = new Set(
       Object.values(surfaces).map(({ applicationId }) => applicationId),
     )
     const removedApplicationIds = retainUnreferencedApplications
       ? []
-      : Object.keys(snapshot.applications).filter(
+      : Object.keys(compositor.state.applications).filter(
           (applicationId) => !referencedApplicationIds.has(applicationId),
         )
     if (removedSurfaceIds.length || removedApplicationIds.length) {
@@ -517,7 +508,7 @@ export default function createCompositor(options = {}) {
       commit({
         surfaces: reconcileSurfaceSelections(surfaces),
         applications: Object.fromEntries(
-          Object.entries(snapshot.applications).filter(
+          Object.entries(compositor.state.applications).filter(
             ([applicationId]) => !removed.has(applicationId),
           ),
         ),
@@ -529,18 +520,27 @@ export default function createCompositor(options = {}) {
     })
   }
 
-  return Object.freeze({
+  const compositor = {
+    state: options.initialSnapshot ?? EMPTY_SNAPSHOT,
     application,
     surface,
     applicationRegistry,
     surfaceComponentRegistry,
     windowManager,
-    getSnapshot: () => snapshot,
+    getSnapshot: () => compositor.state,
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
     cleanup,
     destroy: unsubscribeWindowManager,
+  }
+  Object.values(compositor.state.applications).forEach(record => requireApplicationComponent(record.applicationName))
+  Object.values(compositor.state.surfaces).forEach(surface => {
+    const application = compositor.state.applications[surface.applicationId]
+    const window = windowManager.window.read({ windowId: surface.windowId })
+    if (surface.application !== application) surface.application = application
+    if (surface.window !== window) surface.window = window
   })
+  return compositor
 }

@@ -53,7 +53,7 @@ it('lets Applets sharing an unchanged engine select independent GUI providers an
   const engine = Binding.create()
   const runtime = engine.runtime
   const source = engine.compositor
-  const before = engine.checkpoint.getSnapshot()
+  const before = engine.getState()
   const scene = colour => <AppletEnvironment desktopEnvironment={environment}><AppletEngine engine={engine}>
     <Applet colour="orange" name="host" />
     <Binding><Applet colour={colour} name="hosted" /></Binding>
@@ -67,6 +67,6 @@ it('lets Applets sharing an unchanged engine select independent GUI providers an
     expect(view.container.querySelector('[data-name="hosted"]').textContent).toBe('green')
     expect(engine.runtime).toBe(runtime)
     expect(engine.compositor).toBe(source)
-    expect(engine.checkpoint.getSnapshot()).toBe(before)
+    expect(engine.getState()).toBe(before)
   } finally { engine.destroy() }
 })

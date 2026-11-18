@@ -1,4 +1,4 @@
-export const ABSTRACTION = 'Recursive Applet definitions become a shared runtime of Applications, Windows, Surfaces, occurrence state, resident Decks, and complete checkpoints.'
+export const ABSTRACTION = 'Recursive Applet definitions become a shared runtime of Applications, Windows, Surfaces, occurrence state, resident Decks.'
 
 export { default as AppletEngine } from './AppletEngine.jsx'
 export { default as AppletEnvironment } from './AppletEnvironment.jsx'
@@ -11,7 +11,6 @@ export {
   createAppletStateStore,
   immutableJson,
   useAppletState,
-  validateSurfaceState,
 } from './AppletState.js'
 
 export { useWhichApplet } from './AppletEngine.jsx'

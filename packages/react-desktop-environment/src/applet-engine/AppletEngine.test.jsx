@@ -297,7 +297,6 @@ describe('engine Deck recipes and residence', () => {
     })
     expect(residents.map((surface) => surface.application.applicationName))
       .toEqual(['root/workspace/child', 'root/workspace/other'])
-    expect(engine.checkpoint.isDirty()).toBe(false)
     expect(residents[0].applicationId).not.toBe(engine.applicationInstances['root/workspace/child'].applicationId)
     expect(residents[0].props).toMatchObject({
       resident: { containerSurfaceId: deck.surfaceId, key: 'root/workspace/child' },
@@ -308,10 +307,9 @@ describe('engine Deck recipes and residence', () => {
       initialValue: 'Default',
       stateName: 'title',
     })).toBe('Fresh')
-    expect(engine.checkpoint.isDirty()).toBe(false)
     expect(engine.compositor.surface.read({ surfaceId: deck.surfaceId }).selectedChildSurfaceId)
       .toBe(residents[0].surfaceId)
-    expect(engine.checkpoint.getSnapshot().find(({ surfaceId }) => surfaceId === deck.surfaceId).props.recipe)
+    expect(engine.getState().compositor.surfaces[deck.surfaceId].props.recipe)
       .toEqual({ name: 'tools', residents: [
         { applet: 'root/workspace/child', state: { title: 'Fresh' } },
         { applet: 'root/workspace/other' },
@@ -331,31 +329,23 @@ describe('engine Deck recipes and residence', () => {
     residenceEngines.push(rootEngine)
     const deck = rootEngine.compositor.surface.readChildren({ surfaceId: rootEngine.rootSurfaceId })[0]
     expect(rootEngine.compositor.surface.readChildren({ surfaceId: deck.surfaceId })).toHaveLength(1)
-    expect(rootEngine.checkpoint.isDirty()).toBe(false)
   })
 
-  it.each([false, true])('ends an ordinary Workspace and its supplied residents with intervening save %s', (saved) => {
+  it('closes an ordinary Workspace and its supplied resident Surfaces', () => {
     const { engine } = residenceFixture()
-    const initialState = engine.checkpoint.getSnapshot()
+    const initialState = structuredClone(engine.getState())
     const application = engine.runtime.createApplicationInstance({ applicationName: 'root/workspace' })
     const workspace = engine.runtime.createReferenceSurface({
       applicationId: application.applicationId,
       ownerSurfaceId: engine.rootSurfaceId,
     })
     expect(engine.compositor.surface.readChildren({ surfaceId: workspace.surfaceId })).toHaveLength(1)
-    expect(engine.checkpoint.isDirty()).toBe(true)
-    if (saved) {
-      const capture = engine.checkpoint.capture()
-      engine.checkpoint.markClean(capture)
-      engine.checkpoint.release(capture)
-      expect(engine.checkpoint.isDirty()).toBe(false)
-    }
     engine.compositor.surface.readControls({ surfaceId: workspace.surfaceId }).close()
-    expect(engine.checkpoint.getSnapshot()).toEqual(initialState)
-    expect(engine.checkpoint.isDirty()).toBe(saved)
+    expect(engine.getState().windowManager).toEqual(initialState.windowManager)
+    expect(engine.compositor.application.read(application)).toBeDefined()
   })
 
-  it('supplies a fresh resident after close without retaining the ended state', () => {
+  it('supplies a fresh resident with fresh state after close', () => {
     const { children, deck, engine } = residenceFixture()
     const previous = children(deck.surfaceId)[0]
     engine.appletState.ensure({ applicationId: engine.rootApplicationId, stateName: 'choice', initialValue: 'default' })
@@ -368,9 +358,8 @@ describe('engine Deck recipes and residence', () => {
     expect(next.applicationId).not.toBe(previous.applicationId)
     expect(engine.appletState.ensure({ applicationId: next.applicationId, stateName: 'title', initialValue: 'Default' }))
       .toBe('Fresh')
-    expect(engine.compositor.application.read({ applicationId: previous.applicationId })).toBeUndefined()
+    expect(engine.appletState.read({ applicationId: previous.applicationId, stateName: 'title' })).toBe('Edited')
     expect(engine.appletState.read({ applicationId: engine.rootApplicationId, stateName: 'choice' })).toBe('edited')
-    expect(engine.checkpoint.isDirty()).toBe(true)
   })
 
   it('holds the resident record through a peel, restores cancellation, and supplies after completion', () => {
@@ -413,7 +402,7 @@ describe('engine Deck recipes and residence', () => {
     expect(children(deck.surfaceId)[0].props.order).toBe(0)
     expect(engine.compositor.surface.read({ surfaceId: child.surfaceId })).toBeUndefined()
     expect(engine.appletState.read({ applicationId: other.applicationId, stateName: 'title' })).toBe('Retained')
-    const restored = residenceFixture({ initialState: engine.checkpoint.getSnapshot() })
+    const restored = residenceFixture({ initialState: engine.getState() })
     expect(restored.deck.surfaceId).toBe(deck.surfaceId)
     expect(restored.children(restored.deck.surfaceId).map(({ surfaceId }) => surfaceId)).toEqual([other.surfaceId])
     restored.engine.compositor.surface.readControls({ surfaceId: restored.deck.surfaceId }).close()
@@ -440,35 +429,31 @@ describe('engine Deck recipes and residence', () => {
     expect(engine.compositor.surface.read({ surfaceId: first.surfaceId }).props)
       .toMatchObject({ order: 1, ordinaryChoice: 'edited' })
     expect(engine.compositor.surface.read({ surfaceId: second.surfaceId }).props.order).toBe(0)
-    expect(engine.checkpoint.isDirty()).toBe(true)
 
     engine.compositor.surface.update({ surfaceId: deck.surfaceId, props: deck.props })
     expect(engine.compositor.surface.read({ surfaceId: first.surfaceId }).props)
       .toMatchObject({ order: 0, ordinaryChoice: 'edited' })
     expect(engine.compositor.surface.read({ surfaceId: second.surfaceId }).props.order).toBe(1)
-    expect(engine.checkpoint.isDirty()).toBe(true)
     engine.compositor.surface.update({ surfaceId: first.surfaceId, props: first.props })
-    expect(engine.checkpoint.isDirty()).toBe(false)
   })
 
   it('restores a workspace lacking resident Decks by supplying its default recipes', () => {
     const { deck, engine, workspace } = residenceFixture()
-    const initialState = engine.checkpoint.getSnapshot().filter(({ surfaceId }) => (
-      surfaceId === engine.rootSurfaceId || surfaceId === workspace.surfaceId
-    ))
+    const saved = engine.getState()
+    const surfaces = Object.fromEntries([engine.rootSurfaceId, workspace.surfaceId].map(id => [id, saved.compositor.surfaces[id]]))
+    const initialState = { ...saved, compositor: { ...saved.compositor, surfaces } }
     const restored = residenceFixture({ initialState })
     expect(restored.workspace.surfaceId).toBe(workspace.surfaceId)
     expect(restored.deck.surfaceId).not.toBe(deck.surfaceId)
     expect(restored.children(restored.deck.surfaceId)).toHaveLength(2)
-    expect(restored.engine.checkpoint.isDirty()).toBe(false)
   })
 
   it('restores a Deck with a missing resident by supplying just that occurrence', () => {
     const { children, deck, engine } = residenceFixture()
     const [missing, retained] = children(deck.surfaceId)
-    const initialState = engine.checkpoint.getSnapshot().filter(({ surfaceId }) => (
-      surfaceId !== missing.surfaceId
-    ))
+    const saved = engine.getState()
+    const { [missing.surfaceId]: omitted, ...surfaces } = saved.compositor.surfaces
+    const initialState = { ...saved, compositor: { ...saved.compositor, surfaces } }
     const restored = residenceFixture({ initialState })
     const residents = restored.children(restored.deck.surfaceId)
     expect(restored.deck.surfaceId).toBe(deck.surfaceId)
@@ -476,7 +461,6 @@ describe('engine Deck recipes and residence', () => {
       .toBe(retained.surfaceId)
     expect(residents.find(({ application }) => application.applicationName === 'root/workspace/child').surfaceId)
       .not.toBe(missing.surfaceId)
-    expect(restored.engine.checkpoint.isDirty()).toBe(false)
   })
 })
 
@@ -506,16 +490,16 @@ describe('Applet stack and host operations', () => {
       controls(first.surfaceId).focus()
       engine.runtime.selectChild({ surfaceId: deck.surfaceId, childSurfaceId: second.surfaceId })
       expect(read(second.surfaceId).zIndex).toBeGreaterThan(read(first.surfaceId).zIndex)
-      const visible = engine.checkpoint.getSnapshot()
+      const visible = structuredClone(engine.getState())
       engine.runtime.selectChild({ surfaceId: deck.surfaceId, childSurfaceId: second.surfaceId })
-      expect(engine.checkpoint.getSnapshot()).toEqual(visible)
+      expect(engine.getState()).toEqual(visible)
       controls(third.surfaceId).activate()
       controls(third.surfaceId).close()
       expect(read(deck.surfaceId).selectedChildSurfaceId).toBe(second.surfaceId)
       expect(engine.runtime.presentedSurface({ surfaceId: deck.surfaceId }).surfaceId).toBe(second.surfaceId)
       controls(first.surfaceId).close()
       expect(read(deck.surfaceId).selectedChildSurfaceId).toBe(second.surfaceId)
-      const saved = engine.checkpoint.getSnapshot()
+      const saved = engine.getState()
       const restored = AppletEngine.create({ applet: engine.rootApplet, desktopEnvironment, options: { initialState: saved } })
       try {
         expect(restored.runtime.readSelectedChild({ surfaceId: deck.surfaceId }).surfaceId).toBe(second.surfaceId)
@@ -571,7 +555,7 @@ describe('Applet stack and host operations', () => {
       const removedChild = open('root/child', removedDeck.surfaceId)
       engine.compositor.surface.remove({ surfaceId: removedDeck.surfaceId })
       expect(read(removedChild.surfaceId)).toBeUndefined()
-      expect(engine.compositor.application.read({ applicationId: removedChild.applicationId })).toBeUndefined()
+      expect(engine.compositor.application.read({ applicationId: removedChild.applicationId })).toBeDefined()
     } finally { engine.destroy() }
   })
 })

@@ -68,7 +68,7 @@ roots remain independent; a scheme revisit reuses its exact material. Consumers
 share this lookup through their own GUI composition. `AppletThemeProvider` passes
 resolved material unchanged and can also resolve a declaration using its
 optional `scheme`. Scheme selection belongs to the GUI and changes no runtime
-records, occurrence identities, or checkpoints.
+records or occurrence identities.
 
 The separate `ui/applet` entry leaves the basic `ui` entry independent of
 AppletEngine. Stock controls use ordinary HTML elements and neutral material;

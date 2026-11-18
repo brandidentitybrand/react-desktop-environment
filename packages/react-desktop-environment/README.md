@@ -1,7 +1,6 @@
 # react-desktop-environment
 
-A logical window manager, compositor, recursive Applet runtime, and checkpoint
-recovery with replaceable React presentation.
+A logical window manager, compositor, and recursive Applet runtime with replaceable React presentation.
 
 ## Window manager
 
@@ -90,7 +89,7 @@ import { AppletEngine, AppletEnvironment, createAppletEngine } from 'react-deskt
 ```
 
 The [Applet runtime](./src/applet-engine/README.md) owns recursive registration,
-engine lifetime, Application state, resident Deck mechanics, checkpoints, and
+engine lifetime, Application state, resident Deck mechanics, and
 runtime contexts. Its definition binder and direct constructor accept no GUI
 composition. An Applet receives its Application and Surface under the supplied
 engine and composes its own GUI without configuring that engine.
@@ -100,18 +99,10 @@ The [stock Applet UI](./src/ui/applet/README.md), exported from
 and Deck frames, and theme utilities. A stock Applet composes these in its own
 rendering. Other GUIs use the same runtime through public records and operations.
 
-## Checkpoint recovery
+## Runtime state
 
-```js
-import { createAppletPersistence, resolveInitialAppletCheckpoint } from 'react-desktop-environment/applet-persistence'
-import { createIndexedDbAppletStore } from 'react-desktop-environment/applet-persistence/indexed-db'
-```
-
-The [storage-neutral core](./src/applet-persistence/README.md) composes an opaque
-scope, checkpoint source, and store. The [explicit IndexedDB adapter](./src/applet-persistence/indexed-db/README.md)
-accepts a host database name and keeps complete checkpoints in version-one
-scoped records. Host authentication, browser lifecycle, save/reset, and
-application replacement remain with consumers.
+`engine.getState()` returns the live state object. Supply it as `options.initialState`
+to use that state in another engine. The host owns storage.
 
 ## Package consumption
 
@@ -130,5 +121,4 @@ npm run test:package --workspace react-desktop-environment
 
 The last command packs this package and installs the tarball into a temporary
 independent consumer. It checks public ESM imports, an unrelated Applet tree,
-shared contexts, occurrence state and identity, checkpoint restoration, and
-explicit recovery using the actual artifact.
+shared contexts, occurrence state and identity, and raw state restoration using the actual artifact.

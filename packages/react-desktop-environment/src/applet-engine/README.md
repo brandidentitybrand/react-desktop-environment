@@ -2,7 +2,7 @@
 
 An Applet recursively declares available application definitions. AppletEngine
 raises one definition tree into Applications, Windows, Surfaces, named
-Application state, resident Decks, and complete checkpoints. Presentation belongs
+Application state, and resident Decks. Presentation belongs
 to the GUI that consumes those records and operations.
 
 ## Public entry
@@ -19,7 +19,7 @@ The entry also exports `Deck`, `useDeckComposition`,
 `useChildSurfaceComposition`, `useWhichApplet`, `resolveDeckProps`,
 `minimumPresentationSize`, `constrainPresentationSize`, `AppletApplicationContext`,
 `AppletStateStoreContext`, `createAppletStateStore`, `immutableJson`,
-`validateSurfaceState`, and `useAppletState`. All bindings use one canonical set of contexts and the consumer's React.
+and `useAppletState`. All bindings use one canonical set of contexts and the consumer's React.
 
 `createAppletEngine(Applet)` creates a definition-local React
 binding. Its `.Applet` names that definition and `.Runtime` is the canonical
@@ -70,7 +70,7 @@ nodes. Discovery neither creates occurrences nor maintains another registry.
 window-manager and compositor factories.
 The engine registers its `deck` definition alongside the supplied tree,
 creates permanent Applications and a root Window/Surface, and owns state,
-checkpoints, occurrence operations, and unreachable dynamic cleanup.
+occurrence operations.
 
 An `AppletEngine` provider without a supplied or inherited engine constructs
 and disposes its engine. It owns reset. A nested provider reuses the existing
@@ -141,7 +141,7 @@ the consumer.
 Each Surface selects at most one immediate child. Selecting a card promotes it
 to the top of its owner's stack. Removing that card reveals the next surviving
 card; removing a buried card leaves the top unchanged. Selection composes
-recursively and survives checkpoints. `runtime.readChildStack({ surfaceId,
+recursively and survives restoration. `runtime.readChildStack({ surfaceId,
 fullscreen })` and `runtime.readSelectedChild({ surfaceId, fullscreen })` expose
 the same result to React and imperative consumers. Mounted selection excludes
 floating children, including a card that has just left fullscreen.
@@ -261,7 +261,7 @@ const [value, setValue] = AppletEngine.useState(initialValue, 'semantic-name', {
 
 Names are nonempty strings scoped to the exact Application. A declaration
 supplies a missing value once. The owner adopts recognized saved JSON or uses
-its current default; unknown saved names disappear from the next checkpoint.
+its current default; undeclared saved values remain available before their owner mounts.
 Persistent values must be immutable JSON. `persistent: false` retains temporary
 occurrence values across presentation reparenting but omits them from capture.
 Live callbacks, promises, requests, loading state, and resources remain with
@@ -273,56 +273,20 @@ input may be durable when the owning operation requires them.
 canonical contexts across every binding. The state store API is available for
 runtime owners and tests; ordinary Applets declare named state through the hook.
 
-Hook declarations adopt live values and the clean baseline synchronously. Their
-subscriber notifications run after the current render stack, including when
-React abandons that render. Checkpoint cache invalidation remains synchronous,
-so capture and dirty-state reads immediately see the adopted state. Ordinary
-state writes still notify synchronously.
+## Runtime state
 
-## Surface state and root checkpoints
-
-The complete checkpoint is one `surfaceState[]` array. Each entry carries its
-Surface identity/state, linked Window record, Application identity, and
-`appletState` named JSON. There are no parallel saved maps or checkpoint wrapper.
-Live Application props are not checkpointed. Restoration adopts recognized
-definitions, relationships, geometry, selection, and named values while current
-owners supply missing defaults. Existing recognized identities are retained.
-Unavailable definitions and obsolete values disappear from subsequent capture.
-
-`options.initialState` supplies that direct array. `null` and an empty array
-mean no saved state. `options.cleanState` independently supplies a global clean
-baseline when the chosen initial state came from local recovery. An explicit
-missing clean state leaves recovered local state unsaved.
-
-The checkpoint exposes `getSnapshot()`, `subscribe(listener)`, `capture()`,
-`release(capture)`, `markClean(capture)`, and `isDirty()`. A capture freezes its
-exact submitted array and must be released. Successful explicit saving marks
-that exact capture clean; later writes are excluded. A fresh runtime begins
-with its constructed clean state. A restored baseline is independently adopted
-by current owners, preserving recognized differences from local recovery.
-
-Every durable write is default supply or an ordinary change. Named defaults,
-missing anchors/residents, unavailable selection, and missing full Presentation
-geometry are declared supply. Supply changes only its exact target in live
-state and an existing baseline. An ordinary replacement ends that target's
-supply eligibility. Supply never creates a baseline for local-only recovery.
-The runtime is dirty when its live array differs from its clean array; reverting
-ordinary edits reads clean. This rule applies throughout runtime lifetime,
-including later occurrences and resident replacement.
-
-Full Presentation restoration constrains recorded size using the presented
-Applet's live `meta.minimumSize`, defaulting to 240 by 180. Deck selection
-resolves the actual presented definition. Consumer sizing/peeling material
-uses that same definition contract; container allocations remain separate.
+`engine.getState()` returns the live state by reference. Pass it to
+`options.initialState` to load it. Applications, Windows, and named state can
+exist without a Surface. Application props carry child identities. The host
+decides when to serialize the state.
 
 ## GUI state and material
 
 GUI owners can store durable occurrence data in Surface props through
 `runtime.writeSurfaceProps({ surfaceId, props, supply })`. This merges the
-supplied props using literal property keys, including dots and colons, in both
-live state and the clean baseline. An ordinary write ends supply eligibility for its fields;
+supplied props using literal property keys, including dots and colons, in live state. An ordinary write ends supply eligibility for its fields;
 `supply: { surfaceId: ownerSurfaceId }` follows the same default-supply rules as
-other runtime operations and updates an existing clean baseline. The runtime
+other runtime operations. The runtime
 does not interpret GUI fields or choose their values.
 
 Theme declarations, resolution, caches, and React theme contexts belong to the
@@ -334,5 +298,4 @@ not require replacing, configuring, or publishing through the engine.
 Run `npm test --workspace react-desktop-environment`, then build and run
 `npm run test:package --workspace react-desktop-environment`. The package check
 installs its actual tarball into an independent temporary consumer and exercises
-public ESM entries, one React/context identity, occurrence state, checkpoints,
-and recovery without source aliases.
+public ESM entries, one React/context identity, occurrence state and restoration without source aliases.

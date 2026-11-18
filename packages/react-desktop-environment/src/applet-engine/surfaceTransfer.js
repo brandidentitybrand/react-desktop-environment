@@ -47,15 +47,28 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
       restoreGeometry: original.restoreGeometry,
       props: original.props,
     }
-    let movingSurfaceId = original?.surfaceId
-    let frameSurfaceId
-    let provisionalDeckId
-    let settled = false
-    let stopObservation
+    const allocated = []
+    const createApplication = options => {
+      const before = compositor.getSnapshot().applications
+      const application = runtime.createApplicationInstance(options)
+      Object.keys(compositor.getSnapshot().applications).forEach((id) => {
+        if (!Object.hasOwn(before, id)) allocated.push(id)
+      })
+      return application
+    }
+    const discardApplications = () => {
+      const { applications, surfaces } = compositor.getSnapshot()
+      allocated.forEach((applicationId) => {
+        if (applications[applicationId] && !Object.values(surfaces).some(surface => surface.applicationId === applicationId)) {
+          compositor.application.remove({ applicationId })
+        }
+      })
+    }
+    const transfer = { movingSurfaceId: original?.surfaceId }
 
     const finish = () => {
-      settled = true
-      stopObservation?.()
+      transfer.settled = true
+      transfer.stopObservation?.()
       pending.delete(cancel)
     }
     const restoreCapturedSelection = () => {
@@ -74,23 +87,23 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
         surfaceId: parent.surfaceId, childSurfaceId: replacement.surfaceId,
       })
     }
-    const retainObject = (id, dynamic) => {
+    const retainObject = id => {
       const surface = read(id)
       compositor.surface.update({ surfaceId: id, props: retainedProps(surface.props) })
-      if (dynamic) runtime.retainApplicationInstance({ applicationId: surface.applicationId })
     }
     const cancel = () => {
-      if (settled) return false
+      if (transfer.settled) return false
       finish()
       try {
         const originalParentExists = parentWindowId === null
           || compositor.windowManager.window.read({ windowId: parentWindowId })
-        if (original && read(movingSurfaceId) && originalParentExists) {
+        if (original && read(transfer.movingSurfaceId) && originalParentExists) {
           compositor.windowManager.window.move({ windowId: original.windowId, parentWindowId })
-          compositor.surface.update({ surfaceId: movingSurfaceId, ...captured })
+          compositor.surface.update({ surfaceId: transfer.movingSurfaceId, ...captured })
         }
-        if (!original) close(movingSurfaceId)
-        close(provisionalDeckId)
+        if (!original) close(transfer.movingSurfaceId)
+        close(transfer.provisionalDeckId)
+        discardApplications()
         restoreCapturedSelection()
       } finally {
         release()
@@ -98,25 +111,26 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
       return true
     }
     const retain = ({ geometry } = {}) => {
-      if (settled) return false
-      if (!read(movingSurfaceId) || !read(frameSurfaceId)) {
+      if (transfer.settled) return false
+      if (!read(transfer.movingSurfaceId) || !read(transfer.frameSurfaceId)) {
         cancel()
         return false
       }
-      compositor.surface.update({ surfaceId: frameSurfaceId, ...geometry, hidden: false })
-      retainObject(movingSurfaceId, !original || captured.props.presentationMode === 'preview')
-      if (provisionalDeckId) retainObject(provisionalDeckId, true)
+      compositor.surface.update({ surfaceId: transfer.frameSurfaceId, ...geometry, hidden: false })
+      retainObject(transfer.movingSurfaceId)
+      if (transfer.provisionalDeckId) retainObject(transfer.provisionalDeckId)
       finish()
       release()
       selectReplacement()
       return true
     }
     const remove = () => {
-      if (settled) return false
+      if (transfer.settled) return false
       finish()
       try {
-        close(movingSurfaceId)
-        close(provisionalDeckId)
+        close(transfer.movingSurfaceId)
+        close(transfer.provisionalDeckId)
+        discardApplications()
       } finally {
         release()
       }
@@ -127,42 +141,42 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
     try {
       if (original?.fullscreen) controls(surfaceId).exitFullscreen()
       if (deckApplicationId && !runtime.isDeckSurface({ surfaceId })) {
-        const application = runtime.createApplicationInstance({
-          applicationId: deckApplicationId, transient: true,
+        const application = createApplication({
+          applicationId: deckApplicationId,
         })
         const deck = runtime.createReferenceSurface({
           applicationId: application.applicationId, ownerSurfaceId,
           surfaceProps: { peelProvisional: true },
         })
-        provisionalDeckId = deck.surfaceId
+        transfer.provisionalDeckId = deck.surfaceId
       }
-      const destinationId = provisionalDeckId ?? ownerSurfaceId
+      const destinationId = transfer.provisionalDeckId ?? ownerSurfaceId
       if (original) {
         controls(surfaceId).reparent(destinationId)
         compositor.surface.update({ surfaceId, hidden: false })
       } else {
-        const application = runtime.createApplicationInstance({
-          applicationId, props: applicationProps, cloneState: true, transient: true,
+        const application = createApplication({
+          applicationId, props: applicationProps, cloneState: true,
         })
         const surface = runtime.createReferenceSurface({
           applicationId: application.applicationId, ownerSurfaceId: destinationId,
           surfaceProps: { ...surfaceProps, peelProvisional: true },
         })
-        movingSurfaceId = surface.surfaceId
+        transfer.movingSurfaceId = surface.surfaceId
       }
-      if (provisionalDeckId) runtime.selectChild({
-        surfaceId: provisionalDeckId, childSurfaceId: movingSurfaceId,
+      if (transfer.provisionalDeckId) runtime.selectChild({
+        surfaceId: transfer.provisionalDeckId, childSurfaceId: transfer.movingSurfaceId,
       })
       restoreCapturedSelection()
-      frameSurfaceId = provisionalDeckId ?? movingSurfaceId
-      controls(frameSurfaceId).focus()
-      stopObservation = compositor.subscribe(() => {
-        if (read(movingSurfaceId) && read(frameSurfaceId)) return
-        stopObservation()
+      transfer.frameSurfaceId = transfer.provisionalDeckId ?? transfer.movingSurfaceId
+      controls(transfer.frameSurfaceId).focus()
+      transfer.stopObservation = compositor.subscribe(() => {
+        if (read(transfer.movingSurfaceId) && read(transfer.frameSurfaceId)) return
+        transfer.stopObservation()
         queueMicrotask(cancel)
       })
       pending.add(cancel)
-      return Object.freeze({ movingSurfaceId, frameSurfaceId, cancel, retain, remove })
+      return Object.freeze({ movingSurfaceId: transfer.movingSurfaceId, frameSurfaceId: transfer.frameSurfaceId, cancel, retain, remove })
     } catch (error) {
       cancel()
       throw error
@@ -174,9 +188,8 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
     const target = read(targetSurfaceId)
     if (!source || !target || surfaceId === targetSurfaceId) return false
     const windows = compositor.windowManager.getSnapshot().windows
-    for (let ancestor = target.window; ancestor; ancestor = windows[ancestor.parentWindowId]) {
-      if (ancestor.windowId === source.windowId) return false
-    }
+    const hasSourceAncestor = window => window && (window.windowId === source.windowId || hasSourceAncestor(windows[window.parentWindowId]))
+    if (hasSourceAncestor(target.window)) return false
     if (!runtime.isDeckSurface({ surfaceId: targetSurfaceId })) return false
     if (!resolveDeckProps(target.props).addable) return false
     const sourceIsDeck = runtime.isDeckSurface({ surfaceId })
@@ -186,12 +199,12 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
       ? runtime.readSelectedChild({ surfaceId })?.surfaceId : surfaceId
     const release = retainDeck(surfaceId)
     try {
-      for (const child of children) controls(child.surfaceId).reparent(targetSurfaceId)
+      children.forEach((child) => { controls(child.surfaceId).reparent(targetSurfaceId) })
       if (sourceIsDeck) close(surfaceId)
-      for (const child of children) {
+      children.forEach((child) => {
         const current = read(child.surfaceId)
         compositor.surface.update({ surfaceId: child.surfaceId, props: retainedProps(current.props) })
-      }
+      })
       if (selected) runtime.selectChild({ surfaceId: targetSurfaceId, childSurfaceId: selected })
     } finally {
       release()
@@ -203,7 +216,7 @@ export default function createSurfaceTransfer({ compositor, runtime, retainDeck,
     beginPeel,
     mergeDeck,
     destroy() {
-      for (const cancel of pending) cancel()
+      pending.forEach((cancel) => { cancel() })
     },
   }
 }

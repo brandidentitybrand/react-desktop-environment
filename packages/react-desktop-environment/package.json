@@ -37,14 +37,6 @@
     "./applet-engine": {
       "development": "./src/applet-engine/index.js",
       "import": "./dist/applet-engine.js"
-    },
-    "./applet-persistence": {
-      "development": "./src/applet-persistence/index.js",
-      "import": "./dist/applet-persistence.js"
-    },
-    "./applet-persistence/indexed-db": {
-      "development": "./src/applet-persistence/indexed-db/index.js",
-      "import": "./dist/applet-persistence-indexed-db.js"
     }
   },
   "scripts": {
@@ -63,7 +55,6 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "vite": "^8.2.1",
-    "vitest": "^4.1.10",
-    "fake-indexeddb": "^6.2.4"
+    "vitest": "^4.1.10"
   }
 }
